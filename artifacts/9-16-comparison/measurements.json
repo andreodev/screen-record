@@ -1,0 +1,40 @@
+{
+  "project": "Gravação-1792644400477421000.framestudio",
+  "sourceResolution": [1920, 1080],
+  "durationSeconds": 10.855,
+  "output": {"aspect": "9:16", "resolution": [1080, 1920], "fps": 30},
+  "baseLayer": {"pixels": [886, 498], "widthPercent": 82.0, "heightPercent": 25.9},
+  "automaticKeyframePeakScale": 2.6,
+  "cause": {
+    "previousLowOccupancyRender": "Used a stale target/debug/frame-native binary built before the current native renderer source.",
+    "previewPositionMismatch": "CSS scale was applied around the layer's top-left, but translation subtracted the unscaled base offset.",
+    "cropContainers": "Final scene clips to output canvas; no initial-size container prevents layer enlargement.",
+    "exportTransform": "fit * camera.scale applied once; source aspect preserved."
+  },
+  "comparison": {
+    "timesSeconds": [2.9, 5.5, 8.5, 10.5],
+    "beforeStaleHelper": [
+      {"widthPercent": 80, "heightPercent": 25.9},
+      {"widthPercent": 82, "heightPercent": 26.0},
+      {"widthPercent": 75, "heightPercent": 25.9},
+      {"widthPercent": 82, "heightPercent": 25.9}
+    ],
+    "afterCurrentSourceHelper": [
+      {"widthPercent": 100, "heightPercent": 57.8},
+      {"widthPercent": 100, "heightPercent": 67.5},
+      {"widthPercent": 100, "heightPercent": 63.0},
+      {"widthPercent": 100, "heightPercent": 67.5}
+    ],
+    "sameSourceProject": true,
+    "sameTimestamps": true,
+    "sameKeyframes": true,
+    "measurement": "Approximate visible layer bounding box from extracted PNG endpoints; full-width values mean the screen layer is cropped by canvas edges."
+  },
+  "previewFix": "cameraViewportTransform subtracts the scaled base-left/top offsets so CSS scale and translation match cameraFrame and native export.",
+  "artifacts": {
+    "beforeVideo": "frame-studio-9-16-before-stale.mp4",
+    "afterVideo": "frame-studio-9-16-after.mp4",
+    "afterFrames": ["frame-2.9.png", "frame-5.5.png", "frame-8.5.png", "frame-10.5.png"],
+    "beforeFrames": ["before-2.9.png", "before-5.5.png", "before-8.5.png", "before-10.5.png"]
+  }
+}
