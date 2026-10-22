@@ -3,22 +3,24 @@
     {
       "file" : "c0.png",
       "group" : "png",
-      "height" : 192,
+      "height" : 512,
       "hotspotX" : 0,
       "hotspotY" : 0,
       "id" : "common\/png\/figma-pointer",
       "label" : "figma-pointer",
-      "width" : 192
+      "visibleHeight" : 296,
+      "width" : 512
     },
     {
       "file" : "c1.png",
       "group" : "cursors",
-      "height" : 19,
+      "height" : 1024,
       "hotspotX" : 0,
       "hotspotY" : 0,
       "id" : "cursor-macos",
       "label" : "cursor-macos",
-      "width" : 13
+      "visibleHeight" : 981,
+      "width" : 701
     },
     {
       "file" : "c2.png",
@@ -28,6 +30,7 @@
       "hotspotY" : 0,
       "id" : "scissors",
       "label" : "scissors",
+      "visibleHeight" : 30,
       "width" : 32
     },
     {
@@ -38,1607 +41,1768 @@
       "hotspotY" : 0,
       "id" : "scissors@2",
       "label" : "scissors@2",
+      "visibleHeight" : 30,
       "width" : 32
     },
     {
       "file" : "c4.png",
       "group" : "custom-1",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.080000000000000002,
       "hotspotY" : 0.11,
       "id" : "sets\/custom-1\/pointer-1__8-11",
       "label" : "pointer-1",
-      "width" : 192
+      "visibleHeight" : 897,
+      "width" : 1024
     },
     {
       "file" : "c5.png",
       "group" : "custom-1",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.14000000000000001,
       "hotspotY" : 0.12,
       "id" : "sets\/custom-1\/pointer-2__14-12",
       "label" : "pointer-2",
-      "width" : 192
+      "visibleHeight" : 896,
+      "width" : 1023
     },
     {
       "file" : "c6.png",
       "group" : "custom-1",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.17000000000000001,
       "hotspotY" : 0.17000000000000001,
       "id" : "sets\/custom-1\/pointer-3__17-17",
       "label" : "pointer-3",
-      "width" : 192
+      "visibleHeight" : 898,
+      "width" : 1023
     },
     {
       "file" : "c7.png",
       "group" : "custom-1",
-      "height" : 164,
+      "height" : 874,
       "hotspotX" : 0.10000000000000001,
       "hotspotY" : 0.17000000000000001,
       "id" : "sets\/custom-1\/pointinghand-1__10-17",
       "label" : "pointinghand-1",
-      "width" : 192
+      "visibleHeight" : 749,
+      "width" : 1024
     },
     {
       "file" : "c8.png",
       "group" : "custom-10",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.11,
       "hotspotY" : 0.050000000000000003,
       "id" : "sets\/custom-10\/pointer-1__11-5",
       "label" : "pointer-1",
-      "width" : 127
+      "visibleHeight" : 899,
+      "width" : 677
     },
     {
       "file" : "c9.png",
       "group" : "custom-10",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.059999999999999998,
       "hotspotY" : 0.050000000000000003,
       "id" : "sets\/custom-10\/pointer-2__6-5",
       "label" : "pointer-2",
-      "width" : 136
+      "visibleHeight" : 900,
+      "width" : 726
     },
     {
       "file" : "c10.png",
       "group" : "custom-10",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.070000000000000007,
       "hotspotY" : 0.050000000000000003,
       "id" : "sets\/custom-10\/pointer-4__7-5",
       "label" : "pointer-4",
-      "width" : 136
+      "visibleHeight" : 900,
+      "width" : 726
     },
     {
       "file" : "c11.png",
       "group" : "custom-10",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.080000000000000002,
       "hotspotY" : 0.050000000000000003,
       "id" : "sets\/custom-10\/pointer-5__8-5",
       "label" : "pointer-5",
-      "width" : 127
+      "visibleHeight" : 899,
+      "width" : 678
     },
     {
       "file" : "c12.png",
       "group" : "custom-10",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.059999999999999998,
       "hotspotY" : 0.059999999999999998,
       "id" : "sets\/custom-10\/pointer-6__6-6",
       "label" : "pointer-6",
-      "width" : 140
+      "visibleHeight" : 900,
+      "width" : 745
     },
     {
       "file" : "c13.png",
       "group" : "custom-11",
-      "height" : 181,
+      "height" : 967,
       "hotspotX" : 0.42999999999999999,
       "hotspotY" : 0.02,
       "id" : "sets\/custom-11\/pointer-1__43-2",
       "label" : "pointer-1",
-      "width" : 192
+      "visibleHeight" : 844,
+      "width" : 1024
     },
     {
       "file" : "c14.png",
       "group" : "custom-12",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.050000000000000003,
       "hotspotY" : 0.029999999999999999,
       "id" : "sets\/custom-12\/pointer-1__5-3",
       "label" : "pointer-1",
-      "width" : 128
+      "visibleHeight" : 900,
+      "width" : 680
     },
     {
       "file" : "c15.png",
       "group" : "custom-12",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.34000000000000002,
       "hotspotY" : 0.02,
       "id" : "sets\/custom-12\/pointinghand-1__34-2",
       "label" : "pointinghand-1",
-      "width" : 149
+      "visibleHeight" : 900,
+      "width" : 794
     },
     {
       "file" : "c16.png",
       "group" : "custom-13",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.080000000000000002,
       "hotspotY" : 0.089999999999999997,
       "id" : "sets\/custom-13\/pointer-1__8-9",
       "label" : "pointer-1",
-      "width" : 181
+      "visibleHeight" : 901,
+      "width" : 968
     },
     {
       "file" : "c17.png",
       "group" : "custom-14",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.059999999999999998,
       "hotspotY" : 0.02,
       "id" : "sets\/custom-14\/pointer-1__6-2",
       "label" : "pointer-1",
-      "width" : 119
+      "visibleHeight" : 899,
+      "width" : 633
     },
     {
       "file" : "c18.png",
       "group" : "custom-14",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.34999999999999998,
       "hotspotY" : 0.029999999999999999,
       "id" : "sets\/custom-14\/pointinghand-1__35-3",
       "label" : "pointinghand-1",
-      "width" : 163
+      "visibleHeight" : 900,
+      "width" : 870
     },
     {
       "file" : "c19.png",
       "group" : "custom-15",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.029999999999999999,
       "hotspotY" : 0.029999999999999999,
       "id" : "sets\/custom-15\/pointer-1__3-3",
       "label" : "pointer-1",
-      "width" : 139
+      "visibleHeight" : 899,
+      "width" : 742
     },
     {
       "file" : "c20.png",
       "group" : "custom-15",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.19,
       "hotspotY" : 0.029999999999999999,
       "id" : "sets\/custom-15\/pointinghand-1__19-3",
       "label" : "pointinghand-1",
-      "width" : 175
+      "visibleHeight" : 901,
+      "width" : 934
     },
     {
       "file" : "c21.png",
       "group" : "custom-16",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.040000000000000001,
       "hotspotY" : 0.029999999999999999,
       "id" : "sets\/custom-16\/pointer-1__4-3",
       "label" : "pointer-1",
-      "width" : 130
+      "visibleHeight" : 899,
+      "width" : 692
     },
     {
       "file" : "c22.png",
       "group" : "custom-16",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.34999999999999998,
       "hotspotY" : 0.02,
       "id" : "sets\/custom-16\/pointinghand-1__35-2",
       "label" : "pointinghand-1",
-      "width" : 154
+      "visibleHeight" : 900,
+      "width" : 820
     },
     {
       "file" : "c23.png",
       "group" : "custom-17",
-      "height" : 192,
+      "height" : 1022,
       "hotspotX" : 0.050000000000000003,
       "hotspotY" : 0.059999999999999998,
       "id" : "sets\/custom-17\/pointer-1__5-6",
       "label" : "pointer-1",
-      "width" : 192
+      "visibleHeight" : 895,
+      "width" : 1024
     },
     {
       "file" : "c24.png",
       "group" : "custom-17",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.39000000000000001,
       "hotspotY" : 0.02,
       "id" : "sets\/custom-17\/pointinghand-1__39-2",
       "label" : "pointinghand-1",
-      "width" : 153
+      "visibleHeight" : 899,
+      "width" : 815
     },
     {
       "file" : "c25.png",
       "group" : "custom-18",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.059999999999999998,
       "hotspotY" : 0.059999999999999998,
       "id" : "sets\/custom-18\/pointer-1__6-6",
       "label" : "pointer-1",
-      "width" : 192
+      "visibleHeight" : 898,
+      "width" : 1023
     },
     {
       "file" : "c26.png",
       "group" : "custom-18",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.059999999999999998,
       "hotspotY" : 0.040000000000000001,
       "id" : "sets\/custom-18\/pointer-2__6-4",
       "label" : "pointer-2",
-      "width" : 188
+      "visibleHeight" : 898,
+      "width" : 1005
     },
     {
       "file" : "c27.png",
       "group" : "custom-18",
-      "height" : 153,
+      "height" : 814,
       "hotspotX" : 0.070000000000000007,
       "hotspotY" : 0.17000000000000001,
       "id" : "sets\/custom-18\/pointinghand-1__7-17",
       "label" : "pointinghand-1",
-      "width" : 192
+      "visibleHeight" : 690,
+      "width" : 1024
     },
     {
       "file" : "c28.png",
       "group" : "custom-19",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.029999999999999999,
       "hotspotY" : 0.02,
       "id" : "sets\/custom-19\/pointer-1__3-2",
       "label" : "pointer-1",
-      "width" : 162
+      "visibleHeight" : 898,
+      "width" : 863
     },
     {
       "file" : "c29.png",
       "group" : "custom-19",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.44,
       "hotspotY" : 0.02,
       "id" : "sets\/custom-19\/pointinghand-1__44-2",
       "label" : "pointinghand-1",
-      "width" : 164
+      "visibleHeight" : 898,
+      "width" : 876
     },
     {
       "file" : "c30.png",
       "group" : "custom-2",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.040000000000000001,
       "hotspotY" : 0.029999999999999999,
       "id" : "sets\/custom-2\/pointer-1__4-3",
       "label" : "pointer-1",
-      "width" : 134
+      "visibleHeight" : 900,
+      "width" : 712
     },
     {
       "file" : "c31.png",
       "group" : "custom-2",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.040000000000000001,
       "hotspotY" : 0.029999999999999999,
       "id" : "sets\/custom-2\/pointer-2__4-3",
       "label" : "pointer-2",
-      "width" : 134
+      "visibleHeight" : 901,
+      "width" : 714
     },
     {
       "file" : "c32.png",
       "group" : "custom-20",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.040000000000000001,
       "hotspotY" : 0.029999999999999999,
       "id" : "sets\/custom-20\/pointer-1__4-3",
       "label" : "pointer-1",
-      "width" : 133
+      "visibleHeight" : 900,
+      "width" : 710
     },
     {
       "file" : "c33.png",
       "group" : "custom-20",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.40999999999999998,
       "hotspotY" : 0.029999999999999999,
       "id" : "sets\/custom-20\/pointinghand-1__41-3",
       "label" : "pointinghand-1",
-      "width" : 183
+      "visibleHeight" : 900,
+      "width" : 974
     },
     {
       "file" : "c34.png",
       "group" : "custom-3",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.050000000000000003,
       "hotspotY" : 0.040000000000000001,
       "id" : "sets\/custom-3\/pointer-1__5-4",
       "label" : "pointer-1",
-      "width" : 124
+      "visibleHeight" : 899,
+      "width" : 662
     },
     {
       "file" : "c35.png",
       "group" : "custom-3",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.059999999999999998,
       "hotspotY" : 0.050000000000000003,
       "id" : "sets\/custom-3\/pointer-2__6-5",
       "label" : "pointer-2",
-      "width" : 126
+      "visibleHeight" : 900,
+      "width" : 673
     },
     {
       "file" : "c36.png",
       "group" : "custom-3",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.059999999999999998,
       "hotspotY" : 0.040000000000000001,
       "id" : "sets\/custom-3\/pointer-3__6-4",
       "label" : "pointer-3",
-      "width" : 126
+      "visibleHeight" : 900,
+      "width" : 671
     },
     {
       "file" : "c37.png",
       "group" : "custom-3",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.059999999999999998,
       "hotspotY" : 0.040000000000000001,
       "id" : "sets\/custom-3\/pointer-4__6-4",
       "label" : "pointer-4",
-      "width" : 126
+      "visibleHeight" : 899,
+      "width" : 672
     },
     {
       "file" : "c38.png",
       "group" : "custom-4",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.01,
       "hotspotY" : 0.029999999999999999,
       "id" : "sets\/custom-4\/pointer-1__1-3",
       "label" : "pointer-1",
-      "width" : 130
+      "visibleHeight" : 899,
+      "width" : 694
     },
     {
       "file" : "c39.png",
       "group" : "custom-4",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.02,
       "hotspotY" : 0.040000000000000001,
       "id" : "sets\/custom-4\/pointer-2__2-4",
       "label" : "pointer-2",
-      "width" : 143
+      "visibleHeight" : 900,
+      "width" : 764
     },
     {
       "file" : "c40.png",
       "group" : "custom-5",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.040000000000000001,
       "hotspotY" : 0.029999999999999999,
       "id" : "sets\/custom-5\/pointer-1__4-3",
       "label" : "pointer-1",
-      "width" : 171
+      "visibleHeight" : 899,
+      "width" : 913
     },
     {
       "file" : "c41.png",
       "group" : "custom-5",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.059999999999999998,
       "hotspotY" : 0.050000000000000003,
       "id" : "sets\/custom-5\/pointer-2__6-5",
       "label" : "pointer-2",
-      "width" : 174
+      "visibleHeight" : 900,
+      "width" : 926
     },
     {
       "file" : "c42.png",
       "group" : "custom-5",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.050000000000000003,
       "hotspotY" : 0.040000000000000001,
       "id" : "sets\/custom-5\/pointer-3__5-4",
       "label" : "pointer-3",
-      "width" : 180
+      "visibleHeight" : 900,
+      "width" : 962
     },
     {
       "file" : "c43.png",
       "group" : "custom-5",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.029999999999999999,
       "hotspotY" : 0.040000000000000001,
       "id" : "sets\/custom-5\/pointer-4__3-4",
       "label" : "pointer-4",
-      "width" : 171
+      "visibleHeight" : 900,
+      "width" : 913
     },
     {
       "file" : "c44.png",
       "group" : "custom-5",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.070000000000000007,
       "hotspotY" : 0.059999999999999998,
       "id" : "sets\/custom-5\/pointer-5__7-6",
       "label" : "pointer-5",
-      "width" : 173
+      "visibleHeight" : 899,
+      "width" : 925
     },
     {
       "file" : "c45.png",
       "group" : "custom-6",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.040000000000000001,
       "hotspotY" : 0.050000000000000003,
       "id" : "sets\/custom-6\/pointer-1__4-5",
       "label" : "pointer-1",
-      "width" : 192
+      "visibleHeight" : 897,
+      "width" : 1024
     },
     {
       "file" : "c46.png",
       "group" : "custom-6",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.050000000000000003,
       "hotspotY" : 0.050000000000000003,
       "id" : "sets\/custom-6\/pointer-2__5-5",
       "label" : "pointer-2",
-      "width" : 192
+      "visibleHeight" : 898,
+      "width" : 1024
     },
     {
       "file" : "c47.png",
       "group" : "custom-6",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.059999999999999998,
       "hotspotY" : 0.070000000000000007,
       "id" : "sets\/custom-6\/pointer-3__6-7",
       "label" : "pointer-3",
-      "width" : 192
+      "visibleHeight" : 898,
+      "width" : 1023
     },
     {
       "file" : "c48.png",
       "group" : "custom-6",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.050000000000000003,
       "hotspotY" : 0.040000000000000001,
       "id" : "sets\/custom-6\/pointer-4__5-4",
       "label" : "pointer-4",
-      "width" : 192
+      "visibleHeight" : 899,
+      "width" : 1023
     },
     {
       "file" : "c49.png",
       "group" : "custom-6",
-      "height" : 163,
+      "height" : 868,
       "hotspotX" : 0.040000000000000001,
       "hotspotY" : 0.16,
       "id" : "sets\/custom-6\/pointinghand-1__4-16",
       "label" : "pointinghand-1",
-      "width" : 192
+      "visibleHeight" : 743,
+      "width" : 1024
     },
     {
       "file" : "c50.png",
       "group" : "custom-7",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.080000000000000002,
       "hotspotY" : 0.080000000000000002,
       "id" : "sets\/custom-7\/pointer-10__8-8",
       "label" : "pointer-10",
-      "width" : 192
+      "visibleHeight" : 899,
+      "width" : 1024
     },
     {
       "file" : "c51.png",
       "group" : "custom-7",
-      "height" : 192,
+      "height" : 1023,
       "hotspotX" : 0.13,
       "hotspotY" : 0.10000000000000001,
       "id" : "sets\/custom-7\/pointer-11__13-10",
       "label" : "pointer-11",
-      "width" : 192
+      "visibleHeight" : 899,
+      "width" : 1024
     },
     {
       "file" : "c52.png",
       "group" : "custom-7",
-      "height" : 188,
+      "height" : 1002,
       "hotspotX" : 0.070000000000000007,
       "hotspotY" : 0.070000000000000007,
       "id" : "sets\/custom-7\/pointer-12__7-7",
       "label" : "pointer-12",
-      "width" : 192
+      "visibleHeight" : 877,
+      "width" : 1024
     },
     {
       "file" : "c53.png",
       "group" : "custom-7",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.070000000000000007,
       "hotspotY" : 0.080000000000000002,
       "id" : "sets\/custom-7\/pointer-13__7-8",
       "label" : "pointer-13",
-      "width" : 192
+      "visibleHeight" : 900,
+      "width" : 1024
     },
     {
       "file" : "c54.png",
       "group" : "custom-7",
-      "height" : 192,
+      "height" : 1023,
       "hotspotX" : 0.080000000000000002,
       "hotspotY" : 0.050000000000000003,
       "id" : "sets\/custom-7\/pointer-1__8-5",
       "label" : "pointer-1",
-      "width" : 192
+      "visibleHeight" : 900,
+      "width" : 1024
     },
     {
       "file" : "c55.png",
       "group" : "custom-7",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.080000000000000002,
       "hotspotY" : 0.040000000000000001,
       "id" : "sets\/custom-7\/pointer-2__8-4",
       "label" : "pointer-2",
-      "width" : 192
+      "visibleHeight" : 901,
+      "width" : 1024
     },
     {
       "file" : "c56.png",
       "group" : "custom-7",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.10000000000000001,
       "hotspotY" : 0.11,
       "id" : "sets\/custom-7\/pointer-3__10-11",
       "label" : "pointer-3",
-      "width" : 192
+      "visibleHeight" : 900,
+      "width" : 1024
     },
     {
       "file" : "c57.png",
       "group" : "custom-7",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.080000000000000002,
       "hotspotY" : 0.050000000000000003,
       "id" : "sets\/custom-7\/pointer-4__8-5",
       "label" : "pointer-4",
-      "width" : 192
+      "visibleHeight" : 900,
+      "width" : 1024
     },
     {
       "file" : "c58.png",
       "group" : "custom-7",
-      "height" : 162,
+      "height" : 866,
       "hotspotX" : 0.080000000000000002,
       "hotspotY" : 0.14000000000000001,
       "id" : "sets\/custom-7\/pointer-5__8-14",
       "label" : "pointer-5",
-      "width" : 192
+      "visibleHeight" : 743,
+      "width" : 1024
     },
     {
       "file" : "c59.png",
       "group" : "custom-7",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.080000000000000002,
       "hotspotY" : 0.070000000000000007,
       "id" : "sets\/custom-7\/pointer-6__8-7",
       "label" : "pointer-6",
-      "width" : 192
+      "visibleHeight" : 900,
+      "width" : 1024
     },
     {
       "file" : "c60.png",
       "group" : "custom-7",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.089999999999999997,
       "hotspotY" : 0.080000000000000002,
       "id" : "sets\/custom-7\/pointer-7__9-8",
       "label" : "pointer-7",
-      "width" : 192
+      "visibleHeight" : 900,
+      "width" : 1024
     },
     {
       "file" : "c61.png",
       "group" : "custom-7",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.089999999999999997,
       "hotspotY" : 0.029999999999999999,
       "id" : "sets\/custom-7\/pointer-8__9-3",
       "label" : "pointer-8",
-      "width" : 192
+      "visibleHeight" : 899,
+      "width" : 1024
     },
     {
       "file" : "c62.png",
       "group" : "custom-7",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.080000000000000002,
       "hotspotY" : 0.040000000000000001,
       "id" : "sets\/custom-7\/pointer-9__8-4",
       "label" : "pointer-9",
-      "width" : 192
+      "visibleHeight" : 900,
+      "width" : 1024
     },
     {
       "file" : "c63.png",
       "group" : "custom-7",
-      "height" : 162,
+      "height" : 866,
       "hotspotX" : 0.080000000000000002,
       "hotspotY" : 0.14000000000000001,
       "id" : "sets\/custom-7\/pointinghand-1__8-14",
       "label" : "pointinghand-1",
-      "width" : 192
+      "visibleHeight" : 743,
+      "width" : 1024
     },
     {
       "file" : "c64.png",
       "group" : "custom-8",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.52000000000000002,
       "hotspotY" : 0.52000000000000002,
       "id" : "sets\/custom-8\/closedhand-1__52-52",
       "label" : "closedhand-1",
-      "width" : 182
+      "visibleHeight" : 899,
+      "width" : 971
     },
     {
       "file" : "c65.png",
       "group" : "custom-8",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.040000000000000001,
       "hotspotY" : 0.02,
       "id" : "sets\/custom-8\/pointer-1__4-2",
       "label" : "pointer-1",
-      "width" : 128
+      "visibleHeight" : 900,
+      "width" : 681
     },
     {
       "file" : "c66.png",
       "group" : "custom-8",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.040000000000000001,
       "hotspotY" : 0.02,
       "id" : "sets\/custom-8\/pointer-2__4-2",
       "label" : "pointer-2",
-      "width" : 142
+      "visibleHeight" : 901,
+      "width" : 755
     },
     {
       "file" : "c67.png",
       "group" : "custom-8",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.39000000000000001,
       "hotspotY" : 0.02,
       "id" : "sets\/custom-8\/pointinghand-1__39-2",
       "label" : "pointinghand-1",
-      "width" : 150
+      "visibleHeight" : 900,
+      "width" : 799
     },
     {
       "file" : "c68.png",
       "group" : "custom-9",
-      "height" : 192,
+      "height" : 1023,
       "hotspotX" : 0.059999999999999998,
       "hotspotY" : 0.050000000000000003,
       "id" : "sets\/custom-9\/pointer-1__6-5",
       "label" : "pointer-1",
-      "width" : 192
+      "visibleHeight" : 900,
+      "width" : 1024
     },
     {
       "file" : "c69.png",
       "group" : "custom-9",
-      "height" : 158,
+      "height" : 841,
       "hotspotX" : 0.050000000000000003,
       "hotspotY" : 0.14999999999999999,
       "id" : "sets\/custom-9\/pointinghand-1__5-15",
       "label" : "pointinghand-1",
-      "width" : 192
+      "visibleHeight" : 717,
+      "width" : 1024
     },
     {
       "file" : "c70.png",
       "group" : "halloween",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0,
       "hotspotY" : 0,
       "id" : "sets\/halloween\/pointer-1__8-7.svg",
       "label" : "pointer-1",
-      "width" : 185
+      "visibleHeight" : 846,
+      "width" : 987
     },
     {
       "file" : "c71.png",
       "group" : "halloween",
-      "height" : 159,
+      "height" : 848,
       "hotspotX" : 0,
       "hotspotY" : 0,
       "id" : "sets\/halloween\/pointer-2__8-7.svg",
       "label" : "pointer-2",
-      "width" : 192
+      "visibleHeight" : 547,
+      "width" : 1024
     },
     {
       "file" : "c72.png",
       "group" : "halloween",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0,
       "hotspotY" : 0,
       "id" : "sets\/halloween\/pointer-3__8-7.svg",
       "label" : "pointer-3",
-      "width" : 177
+      "visibleHeight" : 850,
+      "width" : 944
     },
     {
       "file" : "c73.png",
       "group" : "halloween",
-      "height" : 164,
+      "height" : 873,
       "hotspotX" : 0,
       "hotspotY" : 0,
       "id" : "sets\/halloween\/pointer-4__8-7.svg",
       "label" : "pointer-4",
-      "width" : 192
+      "visibleHeight" : 624,
+      "width" : 1024
     },
     {
       "file" : "c74.png",
       "group" : "halloween",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0,
       "hotspotY" : 0,
       "id" : "sets\/halloween\/pointer-5__8-7.svg",
       "label" : "pointer-5",
-      "width" : 182
+      "visibleHeight" : 850,
+      "width" : 971
     },
     {
       "file" : "c75.png",
       "group" : "halloween",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0,
       "hotspotY" : 0,
       "id" : "sets\/halloween\/pointer-6__8-7.svg",
       "label" : "pointer-6",
-      "width" : 190
+      "visibleHeight" : 850,
+      "width" : 1014
     },
     {
       "file" : "c76.png",
       "group" : "halloween",
-      "height" : 180,
+      "height" : 959,
       "hotspotX" : 0,
       "hotspotY" : 0,
       "id" : "sets\/halloween\/pointer-7__8-7.svg",
       "label" : "pointer-7",
-      "width" : 192
+      "visibleHeight" : 783,
+      "width" : 1024
     },
     {
       "file" : "c77.png",
       "group" : "halloween",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0,
       "hotspotY" : 0,
       "id" : "sets\/halloween\/pointer-8__8-7.svg",
       "label" : "pointer-8",
-      "width" : 180
+      "visibleHeight" : 850,
+      "width" : 961
     },
     {
       "file" : "c78.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.46000000000000002,
       "id" : "sets\/macos-tahoe\/beachball-1__50-46",
       "label" : "beachball-1",
-      "width" : 192
+      "visibleHeight" : 850,
+      "width" : 1024
     },
     {
       "file" : "c79.png",
       "group" : "macos-tahoe",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.23000000000000001,
       "hotspotY" : 0,
       "id" : "sets\/macos-tahoe\/busybutclickable-1__23-0",
       "label" : "busybutclickable-1",
-      "width" : 192
+      "visibleHeight" : 1,
+      "width" : 1024
     },
     {
       "file" : "c80.png",
       "group" : "macos-tahoe",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos-tahoe\/cell-1__50-50",
       "label" : "cell-1",
-      "width" : 192
+      "visibleHeight" : 457,
+      "width" : 1024
     },
     {
       "file" : "c81.png",
       "group" : "macos-tahoe",
-      "height" : 181,
+      "height" : 968,
       "hotspotX" : 0.5,
       "hotspotY" : 0.46000000000000002,
       "id" : "sets\/macos-tahoe\/closedhand-1__50-46",
       "label" : "closedhand-1",
-      "width" : 192
+      "visibleHeight" : 793,
+      "width" : 1024
     },
     {
       "file" : "c82.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.12,
       "hotspotY" : 0.050000000000000003,
       "id" : "sets\/macos-tahoe\/contextualmenu-1__12-5",
       "label" : "contextualmenu-1",
-      "width" : 123
+      "visibleHeight" : 912,
+      "width" : 655
     },
     {
       "file" : "c83.png",
       "group" : "macos-tahoe",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.23000000000000001,
       "hotspotY" : 0,
       "id" : "sets\/macos-tahoe\/copy-1__23-0",
       "label" : "copy-1",
-      "width" : 192
+      "visibleHeight" : 1,
+      "width" : 1024
     },
     {
       "file" : "c84.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.46000000000000002,
       "id" : "sets\/macos-tahoe\/cross-1__50-46",
       "label" : "cross-1",
-      "width" : 192
+      "visibleHeight" : 850,
+      "width" : 1024
     },
     {
       "file" : "c85.png",
       "group" : "macos-tahoe",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos-tahoe\/crosshair-1__50-50",
       "label" : "crosshair-1",
-      "width" : 192
+      "visibleHeight" : 624,
+      "width" : 1024
     },
     {
       "file" : "c86.png",
       "group" : "macos-tahoe",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos-tahoe\/help-1__50-50",
       "label" : "help-1",
-      "width" : 192
+      "visibleHeight" : 456,
+      "width" : 1024
     },
     {
       "file" : "c87.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.44,
       "id" : "sets\/macos-tahoe\/ibeam-1__50-44",
       "label" : "ibeam-1",
-      "width" : 88
+      "visibleHeight" : 944,
+      "width" : 469
     },
     {
       "file" : "c88.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.44,
       "id" : "sets\/macos-tahoe\/ibeamstroke-1__50-44",
       "label" : "ibeamstroke-1",
-      "width" : 88
+      "visibleHeight" : 944,
+      "width" : 469
     },
     {
       "file" : "c89.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos-tahoe\/ibeamvertical-1__50-50",
       "label" : "ibeamvertical-1",
-      "width" : 192
+      "visibleHeight" : 360,
+      "width" : 1024
     },
     {
       "file" : "c90.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos-tahoe\/ibeamverticalstroke-1__50-50",
       "label" : "ibeamverticalstroke-1",
-      "width" : 192
+      "visibleHeight" : 360,
+      "width" : 1024
     },
     {
       "file" : "c91.png",
       "group" : "macos-tahoe",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.63,
       "hotspotY" : 0.28999999999999998,
       "id" : "sets\/macos-tahoe\/makealias-1__63-29",
       "label" : "makealias-1",
-      "width" : 192
+      "visibleHeight" : 462,
+      "width" : 1024
     },
     {
       "file" : "c92.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.46000000000000002,
       "id" : "sets\/macos-tahoe\/move-1__50-46",
       "label" : "move-1",
-      "width" : 192
+      "visibleHeight" : 850,
+      "width" : 1024
     },
     {
       "file" : "c93.png",
       "group" : "macos-tahoe",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.23000000000000001,
       "hotspotY" : 0,
       "id" : "sets\/macos-tahoe\/notallowed-1__23-0",
       "label" : "notallowed-1",
-      "width" : 192
+      "visibleHeight" : 1,
+      "width" : 1024
     },
     {
       "file" : "c94.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.55000000000000004,
       "hotspotY" : 0.56999999999999995,
       "id" : "sets\/macos-tahoe\/openhand-1__55-57",
       "label" : "openhand-1",
-      "width" : 173
+      "visibleHeight" : 866,
+      "width" : 922
     },
     {
       "file" : "c95.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.14000000000000001,
       "hotspotY" : 0.059999999999999998,
       "id" : "sets\/macos-tahoe\/pointer-1__14-6",
       "label" : "pointer-1",
-      "width" : 124
+      "visibleHeight" : 912,
+      "width" : 661
     },
     {
       "file" : "c96.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.40000000000000002,
       "hotspotY" : 0.10000000000000001,
       "id" : "sets\/macos-tahoe\/pointinghand-1__40-10",
       "label" : "pointinghand-1",
-      "width" : 155
+      "visibleHeight" : 883,
+      "width" : 825
     },
     {
       "file" : "c97.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.23000000000000001,
       "hotspotY" : 0,
       "id" : "sets\/macos-tahoe\/proof-1__23-0",
       "label" : "proof-1",
-      "width" : 192
+      "visibleHeight" : 1,
+      "width" : 1024
     },
     {
       "file" : "c98.png",
       "group" : "macos-tahoe",
-      "height" : 186,
+      "height" : 994,
       "hotspotX" : 0.5,
       "hotspotY" : 0.35999999999999999,
       "id" : "sets\/macos-tahoe\/resizedown-1__50-36",
       "label" : "resizedown-1",
-      "width" : 192
+      "visibleHeight" : 819,
+      "width" : 1024
     },
     {
       "file" : "c99.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos-tahoe\/resizeeast-1__50-50",
       "label" : "resizeeast-1",
-      "width" : 192
+      "visibleHeight" : 374,
+      "width" : 1024
     },
     {
       "file" : "c100.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos-tahoe\/resizeeastwest-1__50-50",
       "label" : "resizeeastwest-1",
-      "width" : 192
+      "visibleHeight" : 374,
+      "width" : 1024
     },
     {
       "file" : "c101.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.62,
       "hotspotY" : 0.46000000000000002,
       "id" : "sets\/macos-tahoe\/resizeleft-1__62-46",
       "label" : "resizeleft-1",
-      "width" : 186
+      "visibleHeight" : 855,
+      "width" : 993
     },
     {
       "file" : "c102.png",
       "group" : "macos-tahoe",
-      "height" : 130,
+      "height" : 693,
       "hotspotX" : 0.5,
       "hotspotY" : 0.42999999999999999,
       "id" : "sets\/macos-tahoe\/resizeleftright-1__50-43",
       "label" : "resizeleftright-1",
-      "width" : 192
+      "visibleHeight" : 518,
+      "width" : 1024
     },
     {
       "file" : "c103.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.48999999999999999,
       "id" : "sets\/macos-tahoe\/resizenorth-1__50-49",
       "label" : "resizenorth-1",
-      "width" : 86
+      "visibleHeight" : 946,
+      "width" : 461
     },
     {
       "file" : "c104.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.48999999999999999,
       "id" : "sets\/macos-tahoe\/resizenortheast-1__50-49",
       "label" : "resizenortheast-1",
-      "width" : 192
+      "visibleHeight" : 772,
+      "width" : 1024
     },
     {
       "file" : "c105.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1022,
       "hotspotX" : 0.5,
       "hotspotY" : 0.46000000000000002,
       "id" : "sets\/macos-tahoe\/resizenortheastsouthwest-1__50-46",
       "label" : "resizenortheastsouthwest-1",
-      "width" : 192
+      "visibleHeight" : 848,
+      "width" : 1024
     },
     {
       "file" : "c106.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.48999999999999999,
       "id" : "sets\/macos-tahoe\/resizenorthsouth-1__50-49",
       "label" : "resizenorthsouth-1",
-      "width" : 87
+      "visibleHeight" : 946,
+      "width" : 462
     },
     {
       "file" : "c107.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.48999999999999999,
       "id" : "sets\/macos-tahoe\/resizenorthwest-1__50-49",
       "label" : "resizenorthwest-1",
-      "width" : 192
+      "visibleHeight" : 772,
+      "width" : 1024
     },
     {
       "file" : "c108.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1022,
       "hotspotX" : 0.51000000000000001,
       "hotspotY" : 0.46000000000000002,
       "id" : "sets\/macos-tahoe\/resizenorthwestsoutheast-1__51-46",
       "label" : "resizenorthwestsoutheast-1",
-      "width" : 192
+      "visibleHeight" : 848,
+      "width" : 1024
     },
     {
       "file" : "c109.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.38,
       "hotspotY" : 0.45000000000000001,
       "id" : "sets\/macos-tahoe\/resizeright-1__38-45",
       "label" : "resizeright-1",
-      "width" : 186
+      "visibleHeight" : 855,
+      "width" : 993
     },
     {
       "file" : "c110.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.48999999999999999,
       "id" : "sets\/macos-tahoe\/resizesouth-1__50-49",
       "label" : "resizesouth-1",
-      "width" : 86
+      "visibleHeight" : 945,
+      "width" : 461
     },
     {
       "file" : "c111.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.48999999999999999,
       "id" : "sets\/macos-tahoe\/resizesoutheast-1__50-49",
       "label" : "resizesoutheast-1",
-      "width" : 192
+      "visibleHeight" : 772,
+      "width" : 1024
     },
     {
       "file" : "c112.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.48999999999999999,
       "id" : "sets\/macos-tahoe\/resizesouthwest-1__50-49",
       "label" : "resizesouthwest-1",
-      "width" : 192
+      "visibleHeight" : 772,
+      "width" : 1024
     },
     {
       "file" : "c113.png",
       "group" : "macos-tahoe",
-      "height" : 186,
+      "height" : 994,
       "hotspotX" : 0.5,
       "hotspotY" : 0.56999999999999995,
       "id" : "sets\/macos-tahoe\/resizeup-1__50-57",
       "label" : "resizeup-1",
-      "width" : 192
+      "visibleHeight" : 819,
+      "width" : 1024
     },
     {
       "file" : "c114.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.51000000000000001,
       "hotspotY" : 0.47999999999999998,
       "id" : "sets\/macos-tahoe\/resizeupdown-1__51-48",
       "label" : "resizeupdown-1",
-      "width" : 125
+      "visibleHeight" : 909,
+      "width" : 668
     },
     {
       "file" : "c115.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos-tahoe\/resizewest-1__50-50",
       "label" : "resizewest-1",
-      "width" : 192
+      "visibleHeight" : 374,
+      "width" : 1024
     },
     {
       "file" : "c116.png",
       "group" : "macos-tahoe",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos-tahoe\/screenshotselection-1__50-50",
       "label" : "screenshotselection-1",
-      "width" : 192
+      "visibleHeight" : 1,
+      "width" : 1024
     },
     {
       "file" : "c117.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos-tahoe\/screenshotwindow-1__50-50",
       "label" : "screenshotwindow-1",
-      "width" : 192
+      "visibleHeight" : 557,
+      "width" : 1024
     },
     {
       "file" : "c118.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.41999999999999998,
       "hotspotY" : 0.39000000000000001,
       "id" : "sets\/macos-tahoe\/zoomin-1__42-39",
       "label" : "zoomin-1",
-      "width" : 192
+      "visibleHeight" : 850,
+      "width" : 1024
     },
     {
       "file" : "c119.png",
       "group" : "macos-tahoe",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.42999999999999999,
       "hotspotY" : 0.39000000000000001,
       "id" : "sets\/macos-tahoe\/zoomout-1__43-39",
       "label" : "zoomout-1",
-      "width" : 192
+      "visibleHeight" : 850,
+      "width" : 1024
     },
     {
       "file" : "c120.png",
       "group" : "macos",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/beachball-1__50-50",
       "label" : "beachball-1",
-      "width" : 192
+      "visibleHeight" : 586,
+      "width" : 1024
     },
     {
       "file" : "c121.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.23000000000000001,
       "hotspotY" : 0,
       "id" : "sets\/macos\/busybutclickable-1__23-0",
       "label" : "busybutclickable-1",
-      "width" : 192
+      "visibleHeight" : 1,
+      "width" : 1024
     },
     {
       "file" : "c122.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/cell-1__50-50",
       "label" : "cell-1",
-      "width" : 192
+      "visibleHeight" : 457,
+      "width" : 1024
     },
     {
       "file" : "c123.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/closedhand-1__50-50",
       "label" : "closedhand-1",
-      "width" : 192
+      "visibleHeight" : 408,
+      "width" : 1024
     },
     {
       "file" : "c124.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.26000000000000001,
       "hotspotY" : 0.20999999999999999,
       "id" : "sets\/macos\/contextualmenu-1__26-21",
       "label" : "contextualmenu-1",
-      "width" : 192
+      "visibleHeight" : 564,
+      "width" : 1024
     },
     {
       "file" : "c125.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.23000000000000001,
       "hotspotY" : 0,
       "id" : "sets\/macos\/copy-1__23-0",
       "label" : "copy-1",
-      "width" : 192
+      "visibleHeight" : 1,
+      "width" : 1024
     },
     {
       "file" : "c126.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/cross-1__50-50",
       "label" : "cross-1",
-      "width" : 192
+      "visibleHeight" : 484,
+      "width" : 1024
     },
     {
       "file" : "c127.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/crosshair-1__50-50",
       "label" : "crosshair-1",
-      "width" : 192
+      "visibleHeight" : 624,
+      "width" : 1024
     },
     {
       "file" : "c128.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/help-1__50-50",
       "label" : "help-1",
-      "width" : 192
+      "visibleHeight" : 456,
+      "width" : 1024
     },
     {
       "file" : "c129.png",
       "group" : "macos",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/ibeam-1__50-50",
       "label" : "ibeam-1",
-      "width" : 192
+      "visibleHeight" : 468,
+      "width" : 1024
     },
     {
       "file" : "c130.png",
       "group" : "macos",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/ibeamstroke-1__50-50",
       "label" : "ibeamstroke-1",
-      "width" : 192
+      "visibleHeight" : 583,
+      "width" : 1024
     },
     {
       "file" : "c131.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/ibeamvertical-1__50-50",
       "label" : "ibeamvertical-1",
-      "width" : 192
+      "visibleHeight" : 200,
+      "width" : 1024
     },
     {
       "file" : "c132.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/ibeamverticalstroke-1__50-50",
       "label" : "ibeamverticalstroke-1",
-      "width" : 192
+      "visibleHeight" : 313,
+      "width" : 1024
     },
     {
       "file" : "c133.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.63,
       "hotspotY" : 0.28999999999999998,
       "id" : "sets\/macos\/makealias-1__63-29",
       "label" : "makealias-1",
-      "width" : 192
+      "visibleHeight" : 462,
+      "width" : 1024
     },
     {
       "file" : "c134.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/move-1__50-50",
       "label" : "move-1",
-      "width" : 192
+      "visibleHeight" : 498,
+      "width" : 1024
     },
     {
       "file" : "c135.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.23000000000000001,
       "hotspotY" : 0,
       "id" : "sets\/macos\/notallowed-1__23-0",
       "label" : "notallowed-1",
-      "width" : 192
+      "visibleHeight" : 1,
+      "width" : 1024
     },
     {
       "file" : "c136.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/openhand-1__50-50",
       "label" : "openhand-1",
-      "width" : 192
+      "visibleHeight" : 509,
+      "width" : 1024
     },
     {
       "file" : "c137.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.34000000000000002,
       "hotspotY" : 0.23999999999999999,
       "id" : "sets\/macos\/pointer-1__34-24",
       "label" : "pointer-1",
-      "width" : 192
+      "visibleHeight" : 565,
+      "width" : 1024
     },
     {
       "file" : "c138.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.39000000000000001,
       "hotspotY" : 0.26000000000000001,
       "id" : "sets\/macos\/pointinghand-1__39-26",
       "label" : "pointinghand-1",
-      "width" : 192
+      "visibleHeight" : 515,
+      "width" : 1024
     },
     {
       "file" : "c139.png",
       "group" : "macos",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.23000000000000001,
       "hotspotY" : 0,
       "id" : "sets\/macos\/proof-1__23-0",
       "label" : "proof-1",
-      "width" : 192
+      "visibleHeight" : 1,
+      "width" : 1024
     },
     {
       "file" : "c140.png",
       "group" : "macos",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizedown-1__50-50",
       "label" : "resizedown-1",
-      "width" : 192
+      "visibleHeight" : 365,
+      "width" : 1024
     },
     {
       "file" : "c141.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizeeast-1__50-50",
       "label" : "resizeeast-1",
-      "width" : 192
+      "visibleHeight" : 375,
+      "width" : 1024
     },
     {
       "file" : "c142.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizeeastwest-1__50-50",
       "label" : "resizeeastwest-1",
-      "width" : 192
+      "visibleHeight" : 375,
+      "width" : 1024
     },
     {
       "file" : "c143.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizeleft-1__50-50",
       "label" : "resizeleft-1",
-      "width" : 192
+      "visibleHeight" : 515,
+      "width" : 1024
     },
     {
       "file" : "c144.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizeleftright-1__50-50",
       "label" : "resizeleftright-1",
-      "width" : 192
+      "visibleHeight" : 515,
+      "width" : 1024
     },
     {
       "file" : "c145.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizenorth-1__50-50",
       "label" : "resizenorth-1",
-      "width" : 192
+      "visibleHeight" : 429,
+      "width" : 1024
     },
     {
       "file" : "c146.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizenortheast-1__50-50",
       "label" : "resizenortheast-1",
-      "width" : 192
+      "visibleHeight" : 344,
+      "width" : 1024
     },
     {
       "file" : "c147.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizenortheastsouthwest-1__50-50",
       "label" : "resizenortheastsouthwest-1",
-      "width" : 192
+      "visibleHeight" : 456,
+      "width" : 1024
     },
     {
       "file" : "c148.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizenorthsouth-1__50-50",
       "label" : "resizenorthsouth-1",
-      "width" : 192
+      "visibleHeight" : 499,
+      "width" : 1024
     },
     {
       "file" : "c149.png",
       "group" : "macos",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizenorthwest-1__50-50",
       "label" : "resizenorthwest-1",
-      "width" : 192
+      "visibleHeight" : 355,
+      "width" : 1024
     },
     {
       "file" : "c150.png",
       "group" : "macos",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizenorthwestsoutheast-1__50-50",
       "label" : "resizenorthwestsoutheast-1",
-      "width" : 192
+      "visibleHeight" : 469,
+      "width" : 1024
     },
     {
       "file" : "c151.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizeright-1__50-50",
       "label" : "resizeright-1",
-      "width" : 192
+      "visibleHeight" : 514,
+      "width" : 1024
     },
     {
       "file" : "c152.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizesouth-1__50-50",
       "label" : "resizesouth-1",
-      "width" : 192
+      "visibleHeight" : 414,
+      "width" : 1024
     },
     {
       "file" : "c153.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizesoutheast-1__50-50",
       "label" : "resizesoutheast-1",
-      "width" : 192
+      "visibleHeight" : 361,
+      "width" : 1024
     },
     {
       "file" : "c154.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizesouthwest-1__50-50",
       "label" : "resizesouthwest-1",
-      "width" : 192
+      "visibleHeight" : 359,
+      "width" : 1024
     },
     {
       "file" : "c155.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizeup-1__50-50",
       "label" : "resizeup-1",
-      "width" : 192
+      "visibleHeight" : 372,
+      "width" : 1024
     },
     {
       "file" : "c156.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizeupdown-1__50-50",
       "label" : "resizeupdown-1",
-      "width" : 192
+      "visibleHeight" : 555,
+      "width" : 1024
     },
     {
       "file" : "c157.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/resizewest-1__50-50",
       "label" : "resizewest-1",
-      "width" : 192
+      "visibleHeight" : 374,
+      "width" : 1024
     },
     {
       "file" : "c158.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/screenshotselection-1__50-50",
       "label" : "screenshotselection-1",
-      "width" : 192
+      "visibleHeight" : 1,
+      "width" : 1024
     },
     {
       "file" : "c159.png",
       "group" : "macos",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/macos\/screenshotwindow-1__50-50",
       "label" : "screenshotwindow-1",
-      "width" : 192
+      "visibleHeight" : 557,
+      "width" : 1024
     },
     {
       "file" : "c160.png",
       "group" : "macos",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.42999999999999999,
       "hotspotY" : 0.42999999999999999,
       "id" : "sets\/macos\/zoomin-1__43-43",
       "label" : "zoomin-1",
-      "width" : 192
+      "visibleHeight" : 513,
+      "width" : 1024
     },
     {
       "file" : "c161.png",
       "group" : "macos",
-      "height" : 187,
+      "height" : 996,
       "hotspotX" : 0.42999999999999999,
       "hotspotY" : 0.42999999999999999,
       "id" : "sets\/macos\/zoomout-1__43-43",
       "label" : "zoomout-1",
-      "width" : 192
+      "visibleHeight" : 499,
+      "width" : 1024
     },
     {
       "file" : "c162.png",
       "group" : "touch",
-      "height" : 192,
+      "height" : 1024,
       "hotspotX" : 0.5,
       "hotspotY" : 0.5,
       "id" : "sets\/touch\/pointer-1__50-50",
       "label" : "pointer-1",
-      "width" : 192
+      "visibleHeight" : 1016,
+      "width" : 1024
     },
     {
       "file" : "c163.png",
       "group" : "cursors",
-      "height" : 129,
+      "height" : 1024,
       "hotspotX" : 0,
       "hotspotY" : 0,
       "id" : "touch-cursor",
       "label" : "touch-cursor",
-      "width" : 129
+      "visibleHeight" : 1016,
+      "width" : 1024
     }
   ],
   "wallpapers" : [

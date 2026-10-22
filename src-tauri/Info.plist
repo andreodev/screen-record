@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>NSScreenCaptureUsageDescription</key>
+<string>O Frame Studio precisa capturar sua tela para gravar vídeos com cursor e zoom editáveis.</string>
+<key>NSCameraUsageDescription</key>
+<string>O Frame Studio usa a câmera escolhida para incluir sua imagem na gravação, com posição e formato editáveis.</string>
+</dict></plist>

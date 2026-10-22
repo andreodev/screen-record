@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { autoZooms, cameraAt, cameraKeys, cursorAt } from '../src/zoom.ts';
+import { autoZooms, cameraAt, cameraFrame, cameraFromKeys, cameraKeys, cameraPoint, cameraViewportTransform, cursorAt, visibleSpans, zoomsForMode } from '../src/zoom.ts';
 
 const events = [
   { t: 0, x: .1, y: .1, down: false },
@@ -11,6 +11,17 @@ const events = [
 ];
 const zooms = autoZooms(events, 6);
 assert.equal(zooms.length, 2, 'Nearby clicks should share a zoom');
+assert.ok(zooms.every(zoom => zoom.id.startsWith('auto-')), 'Generated focus blocks must remain distinguishable from manual edits');
+const mixedZooms = [...zooms, { id:'hand-edit', start:2, end:3, x:.5, y:.5, scale:1.5, enabled:true }];
+assert.equal(zoomsForMode(mixedZooms, 'auto').length, zooms.length);
+assert.equal(zoomsForMode(mixedZooms, 'manual').length, 1);
+assert.equal(zoomsForMode(mixedZooms, 'hybrid').length, mixedZooms.length);
+assert.deepEqual(zoomsForMode([{ ...zooms[0]!, manualOverride: true }, mixedZooms[2]!], 'hybrid').map(zoom => zoom.id), ['auto-0', 'hand-edit'], 'Hybrid mode places manual edits above generated camera suggestions');
+assert.equal(zoomsForMode([{ ...zooms[0]!, manualOverride: true }], 'manual').length, 1, 'Editing a generated zoom makes it available in manual mode');
+assert.equal(autoZooms([{t:0,x:.1,y:.1,down:false},{t:.1,x:.3,y:.2,down:false},{t:.2,x:.3,y:.2,down:false},{t:.45,x:.3,y:.2,down:false},{t:.5,x:.3,y:.2,down:false}], 2)[0]?.scale, 1.4, 'A significant move followed by a dwell should create one softer focus');
+assert.equal(autoZooms([{t:0,x:.5,y:.5,down:false},{t:.1,x:.51,y:.5,down:false},{t:.5,x:.51,y:.5,down:false}], 2).length, 0, 'Small pointer movements should not trigger a zoom');
+assert.equal(autoZooms([{t:0,x:.2,y:.4,down:false},{t:.5,x:.2,y:.4,down:false,rightDown:true},{t:.55,x:.2,y:.4,down:false,rightDown:false}], 2).length, 1, 'Right-click interactions should be recognized');
+assert.equal(autoZooms([{t:0,x:.1,y:.1,down:false},{t:.2,x:.1,y:.1,down:true},{t:.25,x:.1,y:.1,down:false},{t:.7,x:.9,y:.9,down:true},{t:.75,x:.9,y:.9,down:false}], 3).length, 1, 'A distant second interaction inside the camera cooldown should not trigger a jolt');
 assert.deepEqual(autoZooms(events.map(e => ({ ...e, down: false })), 6), []);
 assert.equal(cursorAt(0, []), null);
 assert.deepEqual(cameraAt(0, []), { x: .5, y: .5, scale: 1 });
@@ -33,9 +44,69 @@ assert.equal(keys[0].t, 0);
 assert.equal(keys[keys.length - 1].t, 6);
 for (let i = 1; i < keys.length; i++) assert.ok(keys[i].t > keys[i - 1].t);
 assert.equal(cursorAt(1, events)?.down, true, 'Click timing should not lag the source event');
+const portraitSpan = 9 / 16 / (16 / 9);
+assert.deepEqual(visibleSpans(16/9, 9/16, true), {x:portraitSpan,y:1}, 'Landscape recordings should expose only the useful 9:16 source window');
+assert.deepEqual(visibleSpans(9/16, 16/9, true), {x:1,y:portraitSpan}, 'Portrait sources framed in landscape should crop vertically');
+assert.deepEqual(visibleSpans(16/9, 9/16, false), {x:1,y:1}, 'Letterboxed output must preserve the complete source');
+const mobileOverview = cameraFrame({ x: .5, y: .5, scale: 1 }, 960, 540, 1080, 1920);
+assert.deepEqual(mobileOverview, { left: 60, top: 690, width: 960, height: 540 }, 'Overview positions the complete recording frame inside the mobile canvas');
+const sampledClick = cursorAt(1, events)!;
+assert.equal(sampledClick.down, true);
+assert.deepEqual(cameraPoint({ x: .5, y: .5, scale: 1 }, sampledClick, 960, 540, 1080, 1920), { x: 156, y: 744 }, 'A recorded click position maps to the same location inside the final canvas');
+const mobileFocus = cameraFrame({ x: .25, y: .6, scale: 1.5 }, 960, 540, 1080, 1920);
+assert.equal(mobileFocus.left + .25 * mobileFocus.width, 540, 'Camera maps the focused source point to the output canvas center');
+assert.equal(mobileFocus.top + .6 * mobileFocus.height, 960, 'Camera maps the focused source point to the output canvas center vertically');
+const previewTransform = cameraViewportTransform({ x: .25, y: .6, scale: 1.5 }, 960, 540, 1080, 1920);
+assert.equal((1080 - 960) / 2 + previewTransform.x, mobileFocus.left, 'Preview translation moves the centered video layer to the camera frame');
+assert.equal((1920 - 540) / 2 + previewTransform.y, mobileFocus.top, 'Preview and export place the recording layer at the same camera position');
+assert.equal((1080 - 960) / 2 + previewTransform.x + .25 * 960 * previewTransform.scale, 540, 'The previewed cursor point stays attached to the video during portrait zoom');
+assert.equal((1920 - 540) / 2 + previewTransform.y + .6 * 540 * previewTransform.scale, 960, 'The previewed cursor point stays attached vertically during portrait zoom');
+assert.deepEqual(cameraPoint({ x: .25, y: .6, scale: 1.5 }, { x: .25, y: .6 }, 960, 540, 1080, 1920), { x: 540, y: 960 }, 'Cursor anchor and camera focus map to the same output point');
+assert.ok(mobileFocus.width > mobileOverview.width && mobileFocus.left > mobileOverview.left, 'Global camera enlarges and repositions the recording layer beyond its overview bounds');
+const desktopFocus = cameraFrame({ x: .7, y: .3, scale: 1.4 }, 1660, 933.75, 1920, 1080);
+assert.equal(desktopFocus.left + .7 * desktopFocus.width, 960, 'Desktop camera uses the same canvas-relative focus coordinates');
+assert.equal(desktopFocus.top + .3 * desktopFocus.height, 540, 'Desktop camera uses the same canvas-relative focus coordinates vertically');
+const gentleZoom = [{ id: 'gentle', start: .4, end: 1.6, x: .7, y: .4, scale: 1.15, enabled: true }];
+const steadyKeys = cameraKeys(gentleZoom, 2, true);
+const shakenKeys = cameraKeys(gentleZoom, 2, true, [], false, 1, 1, false, true);
+const shakeAmount = Math.max(...shakenKeys.map((key, i) => Math.hypot(key.x - steadyKeys[i]!.x, key.y - steadyKeys[i]!.y)));
+assert.ok(shakeAmount > 0 && shakeAmount <= .0013, 'Zoom shake stays visible but below 0.13% of the source frame');
+assert.deepEqual(shakenKeys, cameraKeys(gentleZoom, 2, true, [], false, 1, 1, false, true), 'Shake is deterministic for preview, seeking and export');
+assert.equal(shakenKeys[0]!.x, steadyKeys[0]!.x, 'Shake does not move the camera before a zoom');
+const portraitKeys = cameraKeys([{ id: 'portrait', start: .2, end: 1.8, x: .99, y: .02, scale: 2, enabled: true }], 2, true, [], true, portraitSpan, 1);
+for (const key of portraitKeys) {
+  assert.ok(key.x >= portraitSpan / (2 * key.scale) - 1e-8 && key.x <= 1 - portraitSpan / (2 * key.scale) + 1e-8, 'Mobile camera focus must stay inside the visible 9:16 crop');
+  assert.ok(key.y >= 1 / (2 * key.scale) - 1e-8 && key.y <= 1 - 1 / (2 * key.scale) + 1e-8, 'Mobile camera focus must preserve vertical source bounds');
+}
+const mobileEvents = Array.from({ length: 240 }, (_, i) => ({ t: i / 60, x: .2 + .6 * i / 239, y: .5, down: false }));
+const mobileFollow = cameraKeys([], 4, true, mobileEvents, false, portraitSpan, 1, true);
+assert.ok(cameraFromKeys(3.8, mobileFollow).x > cameraFromKeys(.1, mobileFollow).x + .1, 'Mobile crop should pan smoothly to follow the cursor even between zooms');
+for (const key of mobileFollow) assert.ok(key.x >= portraitSpan / 2 - 1e-8 && key.x <= 1 - portraitSpan / 2 + 1e-8, 'Cursor-follow crop must remain within the recording bounds');
+const analyzedZooms = [
+  { id: 'auto-7', start: 10.491, end: 12.741, x: .501, y: .904, scale: 1.65, enabled: true, follow: true },
+  { id: 'auto-8', start: 13.340, end: 15.590, x: .405, y: .549, scale: 1.4, enabled: true, follow: true },
+  { id: 'auto-9', start: 17.856, end: 19.635, x: .463, y: .663, scale: 1.4, enabled: true, follow: true },
+];
+const analyzedMobile = cameraKeys(analyzedZooms, 19.635, true, [], false, 1, 1, false, false, 16 / 9, .514);
+const analyzedDesktop = cameraKeys(analyzedZooms, 19.635, true, [], false, 1, 1, false, false, 16 / 9, 16 / 9);
+assert.ok(cameraFromKeys(12.906, analyzedMobile).scale > 2.3, 'Mobile zoom must compensate for horizontal footage letterboxed in a 9:16 canvas');
+assert.ok(cameraFromKeys(12.906, analyzedDesktop).scale <= 1.4, 'Desktop framing keeps its contextual auto zoom');
+assert.ok(Math.abs(cameraFromKeys(12.906, analyzedMobile).scale - cameraFromKeys(12.74, analyzedMobile).scale) < .12, 'A short gap between different scenes must pan continuously without returning to overview');
+assert.ok(cameraFromKeys(17, analyzedMobile).scale > 2.2, 'A short pause before the next interaction should retain the current readable scene');
+const mobileHeadroom = cameraKeys([{ id: 'auto-top', start: .2, end: 2.2, x: .4, y: .03, scale: 1.65, enabled: true }], 2.5, true, [], false, 1, 1, false, false, 16 / 9, 9 / 16);
+assert.ok(cameraFromKeys(1.2, mobileHeadroom).scale > 2.85 && cameraFromKeys(1.2, mobileHeadroom).scale < 3, 'Mobile auto framing grows moderately to fill more height while retaining a top margin');
+for (let t = 12.7; t < 14; t += 1 / 60) {
+  const before = cameraFromKeys(t, analyzedMobile), after = cameraFromKeys(t + 1 / 60, analyzedMobile);
+  assert.ok(Math.abs(after.scale - before.scale) < .035 && Math.hypot(after.x - before.x, after.y - before.y) < .035, 'Scene handoffs must stay smooth at video frame cadence');
+}
+const sameRegion = cameraKeys([
+  { id: 'auto-0', start: .2, end: 1.8, x: .6, y: .4, scale: 1.65, enabled: true },
+  { id: 'auto-1', start: 2.4, end: 3.8, x: .63, y: .42, scale: 1.4, enabled: true },
+], 5, true, [], false, 1, 1, false, false, 16 / 9, .514);
+assert.ok(cameraFromKeys(2.1, sameRegion).scale > 2.2, 'Nearby interactions in one region should keep the same camera scene active through short gaps');
 console.log('Zoom checks passed: grouping, bounds, continuity, disabled segments, seek and cursor timing.');
 
-const { smoothCursor, cameraFromKeys } = await import('../src/zoom.ts');
+const { smoothCursor } = await import('../src/zoom.ts');
 const jitter = Array.from({ length: 120 }, (_, i) => ({ t: i / 120, x: .5 + (i % 2 ? .012 : -.012), y: .5, down: i === 60 }));
 const smoothed = smoothCursor(jitter);
 assert.equal(smoothed[60].x, jitter[60].x, 'Smoothing must preserve the exact click position');

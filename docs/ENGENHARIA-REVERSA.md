@@ -43,3 +43,7 @@ Resultado: 195 funções nativas selecionadas tiveram pseudocódigo exportado e 
 O script `scripts/extract-reference-assets.py` recuperou 182 wallpapers em nove coleções (Energy, Glassmorphism, Iridescent, Midnight, Radiant, Raycast, Spring, Sunset e macOS) e 164 arquivos de cursor: 161 SVGs e três PNGs. Há 24 conjuntos de cursor, incluindo macOS, macOS Tahoe, Halloween, toque e vinte conjuntos customizados. Os recursos estão em `~/Screen Studio Recovered/assets/`; o catálogo navegável está em `~/Screen Studio Recovered/catalogo.html`, com manifesto SHA-256 em `metadata/assets.json`.
 
 Os controles de animação recuperados incluem estilos de tela Focado/Suave, cursor Smooth/Medium/Rapid/None e intensidade de motion blur. As molas têm massa, rigidez e amortecimento. Esses comportamentos são calculados no código; não foi encontrado um conjunto de clips de animação correspondentes nos assets inspecionados. A pasta de wallpapers chamada Spring contém imagens, não simulações de molas. Os recursos foram posteriormente integrados; veja [BIBLIOTECA-VISUAL.md](BIBLIOTECA-VISUAL.md).
+
+## Continuação: exportação e paridade
+
+A inspeção foi retomada, os formatos/configurações de exportação foram mapeados no material local e o Frame Studio recebeu exportação configurável até 4K60. A matriz de lacunas e os critérios de aceite estão em [PARIDADE-SCREEN-STUDIO.md](PARIDADE-SCREEN-STUDIO.md). A interface de exportação da referência solicitou ativação; sua aparência não foi validada nesta sessão.

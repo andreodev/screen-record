@@ -18,6 +18,45 @@
     let video;
     for (let i = 0; i < 150; i++) { video = document.querySelector('video'); if (video?.readyState >= 2) break; await wait(200); }
     if (!video || video.readyState < 2) throw new Error('Benchmark video did not load');
+    if (config.mode === 'cursor-quality') {
+      video.pause(); video.currentTime = 0; await wait(300);
+      const cursor = document.querySelector('.rendered-cursor'), image = cursor?.querySelector('img');
+      if (!cursor || !image) throw new Error('Cursor overlay missing');
+      await image.decode();
+      const initialWidth = cursor.getBoundingClientRect().width;
+      video.currentTime = 1.5; await wait(300);
+      const viewport = document.querySelector('.video-viewport').getBoundingClientRect();
+      const bounds = cursor.getBoundingClientRect();
+      if (Math.max(image.naturalWidth,image.naturalHeight) < 1024) throw new Error('Low-resolution cursor loaded');
+      if (cursor.closest('.media-plane')) throw new Error('Cursor still rasterized inside the camera layer');
+      if (Math.abs(bounds.width / initialWidth - 3) > .01) throw new Error('Cursor size did not track camera zoom');
+      if (Math.abs(bounds.x - viewport.x - viewport.width / 2) > 1 || Math.abs(bounds.y - viewport.y - viewport.height / 2) > 1) throw new Error('Cursor hotspot moved away from its source position');
+      await invoke('report_preview_benchmark', {report:{phase:'cursor-quality',passed:true,naturalWidth:image.naturalWidth,naturalHeight:image.naturalHeight,zoomRatio:bounds.width/initialWidth}});
+      shield.remove(); return;
+    }
+    if (config.mode === 'editing-check') {
+      const click = (selector, text) => {
+        const button = [...document.querySelectorAll(selector)].find(item => item.textContent.includes(text));
+        if (!button || button.disabled) throw new Error(`Editing control unavailable: ${text}`);
+        button.click();
+      };
+      video.pause(); video.currentTime = 1.5; await wait(200);
+      click('.timeline-actions button', 'Dividir'); await wait(100);
+      if (document.querySelectorAll('.clip-segment').length !== 2) throw new Error('Split did not create two clips');
+      document.querySelector('.clip-segment').click(); await wait(100);
+      click('.timeline-actions button', 'Apagar'); await wait(100);
+      if (document.querySelectorAll('.clip-segment').length !== 1 || !document.querySelector('.transport').textContent.includes('0:01.500')) throw new Error('Deleted clip did not update the duration');
+      document.querySelector('.zoom-block').click(); await wait(100);
+      click('.timeline-actions button', 'Apagar'); await wait(100);
+      if (document.querySelector('.zoom-block')) throw new Error('Selected zoom was not removed');
+      document.querySelector('[aria-label="Desfazer"]').click(); await wait(100);
+      if (!document.querySelector('.zoom-block')) throw new Error('Undo did not restore the zoom');
+      document.querySelector('[aria-label="Desfazer"]').click(); await wait(100);
+      if (document.querySelectorAll('.clip-segment').length !== 2 || !document.querySelector('.transport').textContent.includes('0:03.000')) throw new Error('Undo did not restore the deleted clip');
+      document.querySelector('[aria-label="Refazer"]').click(); await wait(900);
+      await invoke('report_preview_benchmark', {report:{phase:'editing-check',passed:true,clips:document.querySelectorAll('.clip-segment').length,zooms:document.querySelectorAll('.zoom-block').length}});
+      shield.remove(); return;
+    }
     video.muted = true;
     const measure = async (phase, seconds) => {
       const startUTC = Date.now(), start = performance.now(), intervals = [];
@@ -30,7 +69,7 @@
         function tick(now) {
           if (cancelled || video.paused || document.hidden) { reject(new Error(`Playback interrupted at ${video.currentTime.toFixed(2)}s; paused=${video.paused}, hidden=${document.hidden}`)); return; }
           intervals.push(now - previous); previous = now;
-          const transform = document.querySelector('.media-plane')?.style.transform;
+          const transform = document.querySelector('.video-viewport')?.style.transform;
           if (transform !== previousTransform) { changes++; previousTransform = transform; }
           if (now - start >= seconds * 1000) resolve(); else requestAnimationFrame(tick);
         }
@@ -56,6 +95,15 @@
       const exportButton = document.querySelector('.export-button');
       if (!exportButton) throw new Error('Export button not found');
       exportButton.click();
+      const form = document.querySelector('.export-dialog form');
+      if (!form) throw new Error('Export options did not open');
+      const options = form.querySelectorAll('select');
+      for (const [index, value] of ['1080', '30'].entries()) {
+        options[index].value = value;
+        options[index].dispatchEvent(new Event('change', {bubbles: true}));
+      }
+      await wait(0);
+      form.requestSubmit();
       for (;;) {
         if (cancelled) throw new Error('Benchmark interrupted by user');
         const error = document.querySelector('.error-text');

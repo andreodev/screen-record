@@ -20,7 +20,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(Recorder::default())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![studio::import_video, studio::open_project, studio::save_project, studio::autosave_project, studio::take_pending_project, studio::start_recording, studio::stop_operation, studio::export_video, studio::reveal_clip, studio::studio_asset_root, benchmark::benchmark_config, benchmark::report_preview_benchmark])
+        .invoke_handler(tauri::generate_handler![studio::import_video, studio::choose_background_audio, studio::open_project, studio::save_project, studio::autosave_project, studio::take_pending_project, studio::start_recording, studio::stop_operation, studio::export_video, studio::reveal_clip, studio::studio_asset_root, studio::open_screen_recording_settings, benchmark::benchmark_config, benchmark::report_preview_benchmark])
         .setup(|app| {
             if let Some(config) = benchmark::config()? {
                 if let Some(project) = config["project"].as_str() { *app.state::<Recorder>().pending_project.lock().unwrap_or_else(|e| e.into_inner()) = Some(PathBuf::from(project));
