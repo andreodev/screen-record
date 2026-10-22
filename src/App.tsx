@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -56,9 +57,21 @@ type Webcam = {
   y: number;
   size: number;
   shape: "circle" | "rounded" | "square";
+  keyframes?: WebcamKeyframe[];
+  mode?: WebcamMode;
+  easing?: WebcamEasing;
+  opacity?: number;
+  border?: number;
+  shadow?: number;
+  borderRadius?: number;
+  layouts?: { portrait?: WebcamLayout; landscape?: WebcamLayout };
 };
+type WebcamMode = "static" | "manual" | "auto" | "hybrid";
+type WebcamEasing = "linear" | "ease-in-out" | "ease-out";
+type WebcamKeyframe = { t: number; x: number; y: number; size: number; opacity?: number; borderRadius?: number; easing?: WebcamEasing };
+type WebcamLayout = { x: number; y: number; size: number; shape: Webcam["shape"]; opacity: number; border: number; shadow: number; borderRadius: number; mode: WebcamMode; keyframes: WebcamKeyframe[] };
 type Project = {
-  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
   name: string;
   mediaPath: string;
   zooms: Zoom[];
@@ -87,6 +100,41 @@ type Panel =
   | "audio"
   | "webcam";
 const clock = formatTime;
+function webcamForAspect(camera: Webcam, aspect: string): Webcam {
+  const variant = aspect === "9:16" ? camera.layouts?.portrait : aspect === "16:9" ? camera.layouts?.landscape : undefined;
+  return variant ? { ...camera, ...variant } : camera;
+}
+function webcamLayout(camera: Webcam): WebcamLayout {
+  return { x: camera.x, y: camera.y, size: camera.size, shape: camera.shape, opacity: camera.opacity ?? 1, border: camera.border ?? 2, shadow: camera.shadow ?? 35, borderRadius: camera.borderRadius ?? (camera.shape === "circle" ? 0.5 : camera.shape === "rounded" ? 0.18 : 0), mode: camera.mode ?? (camera.keyframes?.length ? "manual" : "static"), keyframes: camera.keyframes ?? [] };
+}
+function webcamAt(camera: Webcam, time: number): Webcam & { opacity: number; borderRadius: number } {
+  const mode = camera.mode ?? (camera.keyframes?.length ? "manual" : "static");
+  const base = { ...camera, mode, opacity: camera.opacity ?? 1, border: camera.border ?? 2, shadow: camera.shadow ?? 35 };
+  if (mode === "static") return { ...base, opacity: base.opacity, borderRadius: camera.shape === "circle" ? 0.5 : camera.shape === "rounded" ? 0.18 : 0 };
+  const keys = camera.keyframes ?? [];
+  if (!keys.length) return { ...base, opacity: base.opacity, borderRadius: camera.shape === "circle" ? 0.5 : camera.shape === "rounded" ? 0.18 : 0 };
+  let index = keys.findIndex((key) => key.t >= time);
+  if (index < 0) index = keys.length;
+  const a = keys[Math.max(0, index - 1)] ?? keys[0], b = keys[Math.min(index, keys.length - 1)] ?? a;
+  const raw = index === 0 ? 0 : index >= keys.length ? 1 : clamp((time - a.t) / Math.max(0.0001, b.t - a.t), 0, 1);
+  const easing = a.easing ?? "ease-in-out";
+  const amount = easing === "linear" ? raw : easing === "ease-out" ? 1 - (1 - raw) ** 3 : raw * raw * (3 - 2 * raw);
+  const mix = (from: number | undefined, to: number | undefined, fallback: number) => (from ?? fallback) + ((to ?? fallback) - (from ?? fallback)) * amount;
+  return { ...base, x: mix(a.x, b.x, base.x), y: mix(a.y, b.y, base.y), size: mix(a.size, b.size, base.size), opacity: mix(a.opacity, b.opacity, base.opacity), borderRadius: mix(a.borderRadius, b.borderRadius, camera.shape === "circle" ? 0.5 : camera.shape === "rounded" ? 0.18 : 0) };
+}
+function planWebcamState(state: Webcam & { opacity: number; borderRadius: number }, cameraScale: number, aspect: string, sizeFactor: number) {
+  if (state.mode !== "auto" && state.mode !== "hybrid") return state;
+  const side = state.size * sizeFactor;
+  const overlappingFocus = Math.abs(state.x - 0.5) < side / 2 + 0.025 && Math.abs(state.y - 0.5) < side / 2 + 0.025;
+  const margin = Math.max(state.size / 2, side / 2 + 0.025);
+  const candidates = aspect === "9:16"
+    ? [{ x: 1 - margin, y: 1 - margin }, { x: margin, y: 1 - margin }, { x: 1 - margin, y: margin }, { x: margin, y: margin }]
+    : [{ x: 1 - margin, y: 1 - margin }, { x: margin, y: 1 - margin }, { x: 1 - margin, y: margin }, { x: margin, y: margin }];
+  const target = overlappingFocus ? candidates.reduce((best, candidate) => Math.hypot(candidate.x - 0.5, candidate.y - 0.5) > Math.hypot(best.x - 0.5, best.y - 0.5) ? candidate : best) : { x: state.x, y: state.y };
+  const raw = state.mode === "auto" ? clamp((cameraScale - 1.05) / 0.45, 0, 1) : overlappingFocus ? clamp((cameraScale - 1.08) / 0.42, 0, 1) : 0;
+  const amount = raw * raw * (3 - 2 * raw);
+  return { ...state, size: state.mode === "auto" ? state.size * (1 - amount * 0.16) : state.size, x: state.x + (target.x - state.x) * amount, y: state.y + (target.y - state.y) * amount };
+}
 function storedAppearance(): Appearance {
   try {
     const value = JSON.parse(localStorage.getItem("frame-preset") || "null");
@@ -259,6 +307,10 @@ export default function App() {
   const pendingSeek = useRef(0);
   const [capturePermissionDenied, setCapturePermissionDenied] = useState(false);
   const [recordWebcam, setRecordWebcam] = useState(false);
+  const [recordingCameraPosition, setRecordingCameraPosition] = useState({ x: 0.78, y: 0.78 });
+  const [cameraPreviewReady, setCameraPreviewReady] = useState(false);
+  const [cameraPreviewFrame, setCameraPreviewFrame] = useState("");
+  const [cameraPreviewError, setCameraPreviewError] = useState("");
   const [error, setError] = useState("");
   const [time, setTime] = useState(0),
     [playing, setPlaying] = useState(false);
@@ -268,6 +320,8 @@ export default function App() {
   const [rate, setRate] = useState(1);
   const [previewQuality, setPreviewQuality] = useState(1);
   const [previewScale, setPreviewScale] = useState(1);
+  const [webcamClipboard, setWebcamClipboard] = useState<WebcamKeyframe | null>(null);
+  const [webcamKeyTimeDraft, setWebcamKeyTimeDraft] = useState<number | null>(null);
   const [reelMode, setReelMode] = useState(false);
   const exportDialog = useRef<HTMLDialogElement>(null);
   const [exportResolution, setExportResolution] = useState(2160);
@@ -278,6 +332,7 @@ export default function App() {
   const video = useRef<HTMLVideoElement>(null),
     videoViewport = useRef<HTMLDivElement>(null),
     audio = useRef<HTMLAudioElement>(null),
+    clickSoundAudio = useRef<HTMLAudioElement>(null),
     webcamVideo = useRef<HTMLVideoElement>(null),
     plane = useRef<HTMLDivElement>(null),
     cursor = useRef<HTMLDivElement>(null),
@@ -299,9 +354,33 @@ export default function App() {
   mediaRef.current = media;
   const operationRef = useRef(operation);
   operationRef.current = operation;
+  const playingRef = useRef(playing);
+  playingRef.current = playing;
+  const lastClickSoundTime = useRef<number | null>(null);
+  const recordingCameraKeys = useRef<WebcamKeyframe[]>([]);
+  const recordingCameraDrag = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const viewportRef = useRef({ width: 700, height: 400 });
   const desktop = isTauri(),
     busy = operation !== "idle";
+  useEffect(() => {
+    if (!desktop || !recordWebcam || operation !== "idle") {
+      setCameraPreviewReady(false);
+      setCameraPreviewFrame("");
+      return;
+    }
+    setCameraPreviewReady(false);
+    setCameraPreviewFrame("");
+    setCameraPreviewError("");
+    void invoke("start_camera_preview").catch((cause) => {
+      const message = String(cause);
+      setCameraPreviewError(message);
+      setError(message);
+    });
+    return () => {
+      void invoke("stop_camera_preview").catch(() => undefined);
+      setCameraPreviewReady(false);
+    };
+  }, [desktop, recordWebcam, operation]);
   const look = project?.appearance || defaults;
   const ranges = useMemo(
     () => (project ? clipRanges(project.trim, project.clips) : []),
@@ -314,6 +393,8 @@ export default function App() {
   const currentEffect = project?.effects?.find(
     (effect) => effect.id === selectedEffect,
   );
+  const selectedWebcam = project?.webcam ? webcamForAspect(project.webcam, look.aspect) : undefined;
+  const webcamKeyed = !!selectedWebcam?.keyframes?.some((key) => Math.abs(key.t - time) < 0.02);
   const canEditCursor = !!media?.cursorCaptured && media.cursor.length > 0;
   const cursorMotion = cursorMotionFor(look);
   const events = useMemo(
@@ -330,6 +411,16 @@ export default function App() {
           ),
     [media, cursorMotion],
   );
+  const clickTimes = useMemo(() => {
+    const clicks: number[] = [];
+    let wasDown = false;
+    for (const point of media?.cursor ?? []) {
+      const isDown = point.down || !!point.rightDown || !!point.middleDown;
+      if (isDown && !wasDown) clicks.push(point.t);
+      wasDown = isDown;
+    }
+    return clicks;
+  }, [media?.cursor]);
   const cursorSmooth = cursorMotion !== "original";
   const sourceAspect = media ? media.width / media.height : 16 / 10;
   const cameraZooms = useMemo(
@@ -350,6 +441,7 @@ export default function App() {
   };
   const cropFill = !!look.cropFill;
   const followCropCursor = !!look.cropFollowCursor;
+  const webcamSizeFactor = look.aspect === "9:16" ? 0.65 : 1;
   const cameraPadding = (Math.min(size.width, size.height) * look.padding) / 100;
   const contentAspect =
     (size.width - 2 * cameraPadding) /
@@ -395,6 +487,10 @@ export default function App() {
     () => trajectory.filter((k) => k.cut).map((k) => k.t),
     [trajectory],
   );
+  const previewZoomScale = cameraFromKeys(time, trajectory).scale;
+  const currentWebcam = selectedWebcam
+    ? planWebcamState(webcamAt(selectedWebcam, time), previewZoomScale, look.aspect, webcamSizeFactor)
+    : undefined;
   const currentClip =
     selectedClip === null
       ? null
@@ -467,7 +563,7 @@ export default function App() {
       setPlaying(false);
       setMedia(m);
       const loaded: Project = document || {
-        version: m.webcamPath ? 8 : 1,
+        version: m.webcamPath ? 11 : 1,
         mediaPath: m.path,
         name: m.path.split("/").pop() || "Novo take",
         zooms: autoZooms(m.cursor, m.duration),
@@ -488,6 +584,9 @@ export default function App() {
         ...loaded,
         appearance: {
           ...loaded.appearance,
+          clickSounds: loaded.appearance.clickSounds ?? defaults.clickSounds,
+          clickSoundVolume:
+            loaded.appearance.clickSoundVolume ?? defaults.clickSoundVolume,
           cursorMotion:
             loaded.appearance.cursorMotion ??
             ((loaded.appearance.cursorSmooth ?? loaded.appearance.smooth)
@@ -549,10 +648,32 @@ export default function App() {
       setOperation("recording");
       setElapsed(0);
     });
+    void register<string>("camera-preview-frame", (frame) => {
+      setCameraPreviewFrame(`data:image/jpeg;base64,${frame}`);
+      setCameraPreviewReady(true);
+    });
+    void register<string>("camera-preview-error", (message) => {
+      setCameraPreviewError(message);
+      setError(message);
+    });
     void register<{ seconds: number }>("recording-time", (event) =>
       setElapsed(event.seconds),
     );
-    void register<Media>("recording-finished", (m) => load(m));
+    void register<Media>("recording-finished", (m) => {
+      setRecordWebcam(false);
+      load(m);
+      const keys = recordingCameraKeys.current.filter((key) => key.t <= m.duration).sort((a, b) => a.t - b.t);
+      if (m.webcamPath && keys.length > 1) {
+        const loaded = projectRef.current;
+        if (loaded?.webcam) {
+          const first = keys[0]!;
+          const next = { ...loaded, version: 11 as const, webcam: { ...loaded.webcam, x: first.x, y: first.y, mode: "manual" as const, keyframes: keys } };
+          projectRef.current = next;
+          setProject(next);
+        }
+      }
+      recordingCameraKeys.current = [];
+    });
     void register<{ progress: number }>("export-progress", (e) =>
       setProgress(e.progress),
     );
@@ -602,6 +723,7 @@ export default function App() {
   const renderData = useRef({
     trajectory,
     events,
+    clickTimes,
     assetRoot,
     ranges,
     cameraCuts,
@@ -615,6 +737,7 @@ export default function App() {
   renderData.current = {
     trajectory,
     events,
+    clickTimes,
     assetRoot,
     ranges,
     cameraCuts,
@@ -629,6 +752,7 @@ export default function App() {
   renderData.current = {
     trajectory,
     events,
+    clickTimes,
     assetRoot,
     ranges,
     cameraCuts,
@@ -646,6 +770,28 @@ export default function App() {
     const data = renderData.current,
       cam = cameraFromKeys(t, data.trajectory),
       view = viewportRef.current;
+    const previousSoundTime = lastClickSoundTime.current;
+    if (
+      playingRef.current &&
+      p.appearance.clickSounds !== false &&
+      previousSoundTime !== null &&
+      t >= previousSoundTime
+    ) {
+      const volume = clamp(p.appearance.clickSoundVolume ?? 0.3, 0, 1);
+      if (volume > 0) {
+        for (const clickTime of data.clickTimes) {
+          if (clickTime <= previousSoundTime || clickTime > t) continue;
+          if (!data.ranges.some((range) => clickTime >= range.start && clickTime < range.end)) continue;
+          const base = clickSoundAudio.current;
+          if (!base) continue;
+          const sound = base.cloneNode(true) as HTMLAudioElement;
+          sound.volume = volume;
+          sound.addEventListener("ended", () => sound.remove(), { once: true });
+          void sound.play().catch(() => sound.remove());
+        }
+      }
+    }
+    lastClickSoundTime.current = t;
     if (videoViewport.current) {
       const transform = cameraViewportTransform(cam, view.width, view.height, data.sceneWidth, data.sceneHeight);
       videoViewport.current.style.transformOrigin = "top left";
@@ -943,6 +1089,7 @@ export default function App() {
       if (!p) return;
       const kept = clipRanges(p.trim, p.clips);
       const next = editedToSource(sourceToEdited(t, kept), kept);
+      lastClickSoundTime.current = next;
       if (video.current) video.current.currentTime = next;
       if (
         webcamVideo.current &&
@@ -972,11 +1119,26 @@ export default function App() {
           sourceToEdited(element.currentTime, kept),
           kept,
         );
+      lastClickSoundTime.current = element.currentTime;
       const clip = kept.find(
         (c) => element.currentTime >= c.start && element.currentTime < c.end,
       );
       element.playbackRate = rate * (clip ? clipSpeed(clip) : 1);
       try {
+        const clickAudio = clickSoundAudio.current;
+        if (clickAudio?.paused) {
+          clickAudio.muted = true;
+          void clickAudio
+            .play()
+            .then(() => {
+              clickAudio.pause();
+              clickAudio.currentTime = 0;
+              clickAudio.muted = false;
+            })
+            .catch(() => {
+              clickAudio.muted = false;
+            });
+        }
         await element.play();
       } catch (e) {
         setError(String(e));
@@ -1036,6 +1198,11 @@ export default function App() {
       setNotice("Máscara ou destaque removido. ⌘Z desfaz.");
       return;
     }
+    if (webcamKeyed) {
+      toggleWebcamKeyframe();
+      setNotice("Ajuste da webcam removido. ⌘Z desfaz.");
+      return;
+    }
     if (selectedClip === null) return;
     const clips = (
       p.clips ?? [{ start: 0, end: mediaRef.current!.duration }]
@@ -1057,7 +1224,7 @@ export default function App() {
     setTime(next);
     draw(next);
     setNotice("Trecho apagado da edição. ⌘Z desfaz.");
-  }, [selected, selectedClip, selectedEffect, edit, draw]);
+  }, [selected, selectedClip, selectedEffect, webcamKeyed, edit, draw]);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (exportDialog.current?.open) return;
@@ -1075,7 +1242,7 @@ export default function App() {
       }
       if (
         (e.key === "Delete" || e.key === "Backspace") &&
-        (selected || selectedClip !== null || selectedEffect)
+        (selected || selectedClip !== null || selectedEffect || webcamKeyed)
       ) {
         e.preventDefault();
         deleteSelection();
@@ -1120,6 +1287,7 @@ export default function App() {
     selected,
     selectedClip,
     selectedEffect,
+    webcamKeyed,
   ]);
   async function action<T>(
     name: string,
@@ -1203,6 +1371,10 @@ export default function App() {
   async function record() {
     video.current?.pause();
     setElapsed(0);
+    setRecordingCameraPosition({ x: 0.78, y: 0.78 });
+    recordingCameraKeys.current = recordWebcam ? [{ t: 0, x: 0.78, y: 0.78, size: 0.24 }] : [];
+    recordingCameraDrag.current = null;
+    await invoke("stop_camera_preview").catch(() => undefined);
     setOperation("starting");
     setNotice(
       recordWebcam
@@ -1210,6 +1382,37 @@ export default function App() {
         : "Aguardando os primeiros frames. Se solicitado, autorize a gravação de tela no macOS.",
     );
     await action("start_recording", { withWebcam: recordWebcam });
+  }
+  function recordingCameraPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (operation !== "recording") return;
+    const bounds = event.currentTarget.parentElement?.getBoundingClientRect();
+    if (!bounds || !bounds.width || !bounds.height) return;
+    const pointerX = (event.clientX - bounds.left) / bounds.width;
+    const pointerY = (event.clientY - bounds.top) / bounds.height;
+    recordingCameraDrag.current = { offsetX: pointerX - recordingCameraPosition.x, offsetY: pointerY - recordingCameraPosition.y };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function recordingCameraPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = recordingCameraDrag.current;
+    const bounds = event.currentTarget.parentElement?.getBoundingClientRect();
+    if (!drag || !bounds || !bounds.width || !bounds.height) return;
+    const x = clamp((event.clientX - bounds.left) / bounds.width - drag.offsetX, 0.12, 0.88);
+    const y = clamp((event.clientY - bounds.top) / bounds.height - drag.offsetY, 0.12, 0.88);
+    setRecordingCameraPosition({ x, y });
+    const key = { t: Math.max(0, elapsed), x, y, size: 0.24 };
+    const keys = recordingCameraKeys.current;
+    const last = keys[keys.length - 1];
+    if (last && last.t === 0 && key.t === 0) keys[0] = key;
+    else if (last && last.t > 0 && key.t - last.t < 0.2) keys[keys.length - 1] = { ...key, t: last.t };
+    else if (!last || key.t > last.t) keys.push(key);
+  }
+  function recordingCameraPointerUp() {
+    const wasDragging = recordingCameraDrag.current !== null;
+    recordingCameraDrag.current = null;
+    if (!wasDragging) return;
+    const keys = recordingCameraKeys.current;
+    const last = keys[keys.length - 1];
+    if (last && elapsed > last.t) keys.push({ ...recordingCameraPosition, t: elapsed, size: 0.24 });
   }
   async function stop() {
     const previous = operation;
@@ -1231,7 +1434,7 @@ export default function App() {
         ),
         effects: project.effects ?? [],
         backgroundAudio: project.backgroundAudio,
-        webcam: project.webcam,
+        webcam: project.webcam ? { ...webcamForAspect(project.webcam, project.appearance.aspect), layouts: undefined } : undefined,
         appearance: { ...project.appearance, cropFill },
         keys: trajectory,
         cursor: events,
@@ -1245,7 +1448,7 @@ export default function App() {
   function appearance(patch: Partial<Appearance>) {
     edit((p) => ({
       ...p,
-      version: 4,
+      version: 11,
       appearance: {
         ...p.appearance,
         ...(patch.smooth !== undefined
@@ -1254,6 +1457,9 @@ export default function App() {
         ...patch,
       },
     }));
+  }
+  function setClickSoundVolume(volume: number) {
+    appearance({ clickSoundVolume: volume });
   }
   function setCameraMode(mode: NonNullable<Appearance["cameraMode"]>) {
     appearance({ cameraMode: mode });
@@ -1321,10 +1527,48 @@ export default function App() {
       ),
     }));
   }
-  function webcamChange(patch: Partial<Webcam>) {
-    edit((p) =>
-      p.webcam ? { ...p, version: 8, webcam: { ...p.webcam, ...patch } } : p,
-    );
+  function webcamChange(patch: Partial<Webcam> & Partial<WebcamKeyframe>) {
+    edit((p) => {
+      if (!p.webcam) return p;
+      const original = p.webcam, aspectKey = look.aspect === "9:16" ? "portrait" : look.aspect === "16:9" ? "landscape" : null;
+      const camera = webcamForAspect(original, look.aspect), keys = camera.keyframes ?? [];
+      const save = (value: Webcam): Project => ({ ...p, version: 11, webcam: aspectKey ? { ...original, layouts: { ...original.layouts, [aspectKey]: webcamLayout(value) } } : { ...value, layouts: original.layouts } });
+      if (!keys.length || (camera.mode ?? "static") === "static") return save({ ...camera, ...patch });
+      const at = clamp(time, p.trim.start, p.trim.end), value = webcamAt(camera, at);
+      const key: WebcamKeyframe = { t: at, x: patch.x ?? value.x, y: patch.y ?? value.y, size: patch.size ?? value.size, opacity: patch.opacity ?? value.opacity, borderRadius: patch.borderRadius ?? value.borderRadius, easing: patch.easing ?? keys.find((item) => Math.abs(item.t - at) < 0.02)?.easing ?? "ease-in-out" };
+      const index = keys.findIndex((item) => Math.abs(item.t - at) < 0.02);
+      const nextKeys = index >= 0 ? keys.map((item, i) => i === index ? key : item) : [...keys, key].sort((a, b) => a.t - b.t);
+      const { x: _x, y: _y, size: _size, opacity: _opacity, borderRadius: _radius, easing: _easing, ...basePatch } = patch;
+      return save({ ...camera, ...basePatch, mode: "manual", keyframes: nextKeys });
+    });
+  }
+  function toggleWebcamKeyframe() {
+    edit((p) => {
+      if (!p.webcam || !media) return p;
+      const original = p.webcam, aspectKey = look.aspect === "9:16" ? "portrait" : look.aspect === "16:9" ? "landscape" : null;
+      const camera = webcamForAspect(original, look.aspect), at = clamp(time, p.trim.start, p.trim.end), keys = [...(camera.keyframes ?? [])];
+      const save = (value: Webcam): Project => ({ ...p, version: 11, webcam: aspectKey ? { ...original, layouts: { ...original.layouts, [aspectKey]: webcamLayout(value) } } : { ...value, layouts: original.layouts } });
+      const index = keys.findIndex((item) => Math.abs(item.t - at) < 0.02);
+      if (index >= 0) {
+        keys.splice(index, 1);
+        return save({ ...camera, keyframes: keys, mode: keys.length ? "manual" : "static" });
+      }
+      const state = webcamAt(camera, at);
+      if (!keys.length) keys.push({ t: p.trim.start, x: camera.x, y: camera.y, size: camera.size, opacity: camera.opacity ?? 1, borderRadius: camera.borderRadius ?? (camera.shape === "circle" ? 0.5 : camera.shape === "rounded" ? 0.18 : 0), easing: "ease-in-out" });
+      if (Math.abs(at - p.trim.start) >= 0.02) keys.push({ t: at, x: state.x, y: state.y, size: state.size, opacity: state.opacity, borderRadius: state.borderRadius, easing: "ease-in-out" });
+      keys.sort((a, b) => a.t - b.t);
+      return save({ ...camera, mode: "manual", keyframes: keys });
+    });
+  }
+  function retimeWebcamKeyframe(nextTime: number) {
+    if (!project?.webcam) return;
+    const at = clamp(nextTime, project.trim.start, project.trim.end), original = project.webcam;
+    const aspectKey = look.aspect === "9:16" ? "portrait" : look.aspect === "16:9" ? "landscape" : null;
+    const camera = webcamForAspect(original, look.aspect), keys = camera.keyframes ?? [];
+    const index = keys.findIndex((key) => Math.abs(key.t - time) < 0.02);
+    if (index < 0 || keys.some((key, i) => i !== index && Math.abs(key.t - at) < 0.02)) return;
+    const updated = { ...camera, keyframes: keys.map((key, i) => i === index ? { ...key, t: at } : key).sort((a, b) => a.t - b.t) };
+    edit((p) => ({ ...p, version: 11, webcam: aspectKey ? { ...original, layouts: { ...original.layouts, [aspectKey]: webcamLayout(updated) } } : { ...updated, layouts: original.layouts } }));
   }
   function dragWebcam(event: React.PointerEvent<HTMLVideoElement>) {
     const original = projectRef.current;
@@ -1332,10 +1576,12 @@ export default function App() {
     event.preventDefault();
     event.stopPropagation();
     video.current?.pause();
-    const rect = event.currentTarget.parentElement!.getBoundingClientRect(),
+    const rect = event.currentTarget.closest(".scene")!.getBoundingClientRect(),
       startX = event.clientX,
       startY = event.clientY,
-      initial = original.webcam;
+      aspectKey = look.aspect === "9:16" ? "portrait" : look.aspect === "16:9" ? "landscape" : null,
+      initialCamera = webcamForAspect(original.webcam, look.aspect),
+      initial = webcamAt(initialCamera, time);
     let saved = false;
     const move = (e: PointerEvent) => {
       const p = projectRef.current;
@@ -1349,20 +1595,28 @@ export default function App() {
         setFuture([]);
         saved = true;
       }
-      const webcam = {
-        ...p.webcam,
+      const base = p.webcam, camera = webcamForAspect(base, look.aspect), current = webcamAt(camera, time);
+      const position = {
         x: clamp(
           initial.x + (e.clientX - startX) / rect.width,
-          initial.size / 2,
-          1 - initial.size / 2,
+          (current.size * webcamSizeFactor) / 2,
+          1 - (current.size * webcamSizeFactor) / 2,
         ),
         y: clamp(
           initial.y + (e.clientY - startY) / rect.height,
-          initial.size / 2,
-          1 - initial.size / 2,
+          (current.size * webcamSizeFactor) / 2,
+          1 - (current.size * webcamSizeFactor) / 2,
         ),
       };
-      const next = { ...p, version: 8 as const, webcam };
+      const keys = camera.keyframes ?? [];
+      const key: WebcamKeyframe = { t: time, ...current, ...position, easing: "ease-in-out" };
+      const updated: Webcam = keys.length
+        ? { ...camera, mode: "manual", keyframes: [...keys.filter((item) => Math.abs(item.t - time) >= 0.02), key].sort((a, b) => a.t - b.t) }
+        : { ...camera, ...position };
+      const webcam: Webcam = aspectKey
+        ? { ...base, layouts: { ...base.layouts, [aspectKey]: webcamLayout(updated) } }
+        : { ...updated, layouts: base.layouts };
+      const next = { ...p, version: 11 as const, webcam };
       projectRef.current = next;
       setProject(next);
     };
@@ -2176,6 +2430,12 @@ export default function App() {
                           projectRef.current?.backgroundAudio?.volume ?? 0.25;
                       }}
                     />
+                    <audio
+                      ref={clickSoundAudio}
+                      src={assetURL("mouse-click.wav")}
+                      preload="auto"
+                      hidden
+                    />
                     <canvas
                       className="preview-proxy"
                       ref={qualityCanvas}
@@ -2183,30 +2443,6 @@ export default function App() {
                       aria-hidden="true"
                     />
                   </div>
-                  {project?.webcam && (
-                    <video
-                      ref={webcamVideo}
-                      className={`webcam-overlay ${project.webcam.shape}`}
-                      src={convertFileSrc(project.webcam.path)}
-                      muted
-                      playsInline
-                      preload="auto"
-                      aria-label="Webcam na gravação; arraste para reposicionar"
-                      onPointerDown={dragWebcam}
-                      onLoadedMetadata={(e) => {
-                        const v = e.currentTarget;
-                        if (video.current) {
-                          v.currentTime = video.current.currentTime;
-                          if (!video.current.paused) void v.play();
-                        }
-                      }}
-                      style={{
-                        left: `${project.webcam.x * vw}px`,
-                        top: `${project.webcam.y * vh}px`,
-                        width: `${project.webcam.size * Math.min(vw, vh)}px`,
-                      }}
-                    />
-                  )}
                   <canvas
                     className="motion-preview"
                     ref={motionCanvas}
@@ -2363,6 +2599,34 @@ export default function App() {
                     />
                   )}
                 </div>
+                {project?.webcam && (
+                  <video
+                    ref={webcamVideo}
+                    className={`webcam-overlay ${currentWebcam?.shape ?? project.webcam.shape}`}
+                    src={convertFileSrc(project.webcam.path)}
+                    muted
+                    playsInline
+                    preload="auto"
+                    aria-label="Webcam na gravação; arraste para reposicionar"
+                    onPointerDown={dragWebcam}
+                    onLoadedMetadata={(e) => {
+                      const v = e.currentTarget;
+                      if (video.current) {
+                        v.currentTime = video.current.currentTime;
+                        if (!video.current.paused) void v.play();
+                      }
+                    }}
+                    style={{
+                      left: `${(currentWebcam ?? project.webcam).x * size.width}px`,
+                      top: `${(currentWebcam ?? project.webcam).y * size.height}px`,
+                      width: `${(currentWebcam ?? project.webcam).size * webcamSizeFactor * Math.min(size.width, size.height)}px`,
+                      opacity: currentWebcam?.opacity ?? 1,
+                      borderRadius: `${(currentWebcam?.shape === "circle" ? 0.5 : currentWebcam?.borderRadius ?? (currentWebcam?.shape === "rounded" ? 0.18 : 0)) * 100}%`,
+                      borderWidth: `${((currentWebcam?.border ?? 2) * size.width) / 1000}px`,
+                      boxShadow: (currentWebcam?.shadow ?? 35) > 0 ? `0 ${(currentWebcam?.size ?? 0.24) * size.width * 0.025}px ${(currentWebcam?.size ?? 0.24) * size.width * 0.055}px rgba(0,0,0,${((currentWebcam?.shadow ?? 35) / 100) * 0.6})` : "none",
+                    }}
+                  />
+                )}
                 <div
                   className="rendered-cursor"
                   ref={cursor}
@@ -2413,6 +2677,21 @@ export default function App() {
             operation === "stopping" ? (
               <div className="operation-overlay">
                 <span className="red-dot" />
+                {recordWebcam && (operation === "recording" || operation === "starting") && (
+                  <div
+                    className="recording-camera-bubble"
+                    style={{ left: `${recordingCameraPosition.x * 100}%`, top: `${recordingCameraPosition.y * 100}%`, width: `${Math.min(size.width, size.height) * 0.24 * (look.aspect === "9:16" ? 0.65 : 1)}px` }}
+                    onPointerDown={recordingCameraPointerDown}
+                    onPointerMove={recordingCameraPointerMove}
+                    onPointerUp={recordingCameraPointerUp}
+                    onPointerCancel={recordingCameraPointerUp}
+                    aria-label="Prévia da webcam. Arraste para escolher a posição no vídeo."
+                    title="Arraste para escolher a posição da webcam no vídeo"
+                  >
+                    {cameraPreviewFrame ? <img src={cameraPreviewFrame} alt="Sua câmera ao vivo" /> : <span className="recording-camera-placeholder">◉</span>}
+                    <span className="recording-camera-label"><i /> Arraste para posicionar</span>
+                  </div>
+                )}
                 <strong>
                   {operation === "recording"
                     ? "Gravando o monitor principal"
@@ -2433,6 +2712,16 @@ export default function App() {
                 </button>
               </div>
             ) : null}
+            {recordWebcam && operation === "idle" && (
+              <aside className="camera-live-preview" aria-label="Prévia ao vivo da webcam">
+                {cameraPreviewFrame ? <img src={cameraPreviewFrame} alt="Prévia ao vivo da webcam" /> : <div className="camera-preview-placeholder">◉</div>}
+                <span className="camera-preview-caption">
+                  <i className={`camera-preview-dot${cameraPreviewReady ? " ready" : ""}`} />
+                  {cameraPreviewError ? "Câmera bloqueada" : cameraPreviewReady ? "Webcam pronta" : "Aguardando acesso à câmera…"}
+                </span>
+                {cameraPreviewError && <><p className="camera-preview-error">{cameraPreviewError}</p><button className="camera-preview-settings" onClick={() => void invoke("open_camera_settings")}>Abrir permissão da câmera ↗</button><button className="camera-preview-settings" onClick={() => { setCameraPreviewError(""); void invoke("start_camera_preview").catch((cause) => setCameraPreviewError(String(cause))); }}>Tentar novamente</button></>}
+              </aside>
+            )}
           </div>
           <div className="transport">
             <span className="timecode">{clock(editedTime)}</span>
@@ -3186,9 +3475,30 @@ export default function App() {
                 {project?.webcam ? (
                   <>
                     <p className="help">
-                      Arraste sua imagem diretamente na prévia para escolher
-                      onde ela aparece.
+                      Arraste a webcam pelo quadro. Os ajustes são independentes
+                      para 16:9 e 9:16 e não recebem o zoom da tela.
                     </p>
+                    <label className="select-field">
+                      Animação
+                      <select value={currentWebcam?.mode ?? "static"} onChange={(e) => webcamChange({ mode: e.target.value as WebcamMode })}>
+                        <option value="static">Estática</option><option value="manual">Manual por keyframes</option><option value="auto">Automática</option><option value="hybrid">Híbrida</option>
+                      </select>
+                    </label>
+                    <p className="help">Automática e híbrida afastam a webcam do foco central quando há risco de cobrir a área ampliada. Não inferem fala nem reagem a cada clique.</p>
+                    {look.aspect === "9:16" && (
+                      <button
+                        className="wide subtle"
+                        onClick={() => {
+                          appearance({ cropFill: false, cropFollowCursor: false, padding: 2 });
+                          webcamChange({ x: 0.5, y: 0.7, size: 0.6 });
+                        }}
+                      >
+                        Posicionar abaixo da tela
+                      </button>
+                    )}
+                    <button className={`wide subtle ${webcamKeyed ? "camera-key-active" : ""}`} onClick={toggleWebcamKeyframe}>
+                      {webcamKeyed ? "◆ Ajuste neste momento · remover" : "◇ Adicionar ajuste neste momento"}
+                    </button>
                     <div
                       className="segmented"
                       role="group"
@@ -3203,10 +3513,8 @@ export default function App() {
                       ).map(([shape, label]) => (
                         <button
                           key={shape}
-                          className={
-                            project.webcam?.shape === shape ? "active" : ""
-                          }
-                          aria-pressed={project.webcam?.shape === shape}
+                          className={currentWebcam?.shape === shape ? "active" : ""}
+                          aria-pressed={currentWebcam?.shape === shape}
                           onClick={() => webcamChange({ shape })}
                         >
                           {label}
@@ -3215,32 +3523,38 @@ export default function App() {
                     </div>
                     <Range
                       label="Tamanho"
-                      min={8}
-                      max={60}
+                      min={Math.round(8 * webcamSizeFactor)}
+                      max={Math.round(60 * webcamSizeFactor)}
                       suffix="%"
-                      value={project.webcam.size * 100}
+                      value={(currentWebcam ?? project.webcam).size * webcamSizeFactor * 100}
                       onChange={(size) => {
-                        const camera = project.webcam;
-                        if (camera)
-                          webcamChange({
-                            size: size / 100,
-                            x: clamp(camera.x, size / 200, 1 - size / 200),
-                            y: clamp(camera.y, size / 200, 1 - size / 200),
-                          });
+                        const camera = currentWebcam;
+                        const normalizedSize = size / (100 * webcamSizeFactor);
+                        if (camera) webcamChange({ size: normalizedSize, x: clamp(camera.x, normalizedSize / 2, 1 - normalizedSize / 2), y: clamp(camera.y, normalizedSize / 2, 1 - normalizedSize / 2) });
                       }}
                     />
+                    <label className="switch-label">Exibir webcam<input type="checkbox" checked={(currentWebcam?.opacity ?? 1) > 0} onChange={(e) => webcamChange({ opacity: e.target.checked ? 1 : 0 })} /></label>
+                    <Range label="Opacidade" min={0} max={100} suffix="%" value={Math.round((currentWebcam?.opacity ?? 1) * 100)} onChange={(v) => webcamChange({ opacity: v / 100 })} />
+                    <Range label="Borda" min={0} max={8} suffix=" px" value={currentWebcam?.border ?? 2} onChange={(v) => webcamChange({ border: v })} />
+                    <Range label="Sombra" min={0} max={100} suffix="%" value={currentWebcam?.shadow ?? 35} onChange={(v) => webcamChange({ shadow: v })} />
+                    <h3>Posição</h3>
+                    <div className="segmented camera-corners">
+                      {([[0.2, 0.2, "↖"], [0.8, 0.2, "↗"], [0.2, 0.8, "↙"], [0.8, 0.8, "↘"]] as const).map(([x, y, label]) => <button key={label} onClick={() => { const camera = currentWebcam; if (camera) webcamChange({ x: clamp(x, camera.size / 2, 1 - camera.size / 2), y: clamp(y, camera.size / 2, 1 - camera.size / 2) }); }}>{label}</button>)}
+                    </div>
+                    {webcamKeyed && currentWebcam?.mode !== "static" && <>
+                      <label className="select-field">Curva da transição<select value={selectedWebcam?.keyframes?.find((key) => Math.abs(key.t - time) < 0.02)?.easing ?? "ease-in-out"} onChange={(e) => webcamChange({ easing: e.target.value as WebcamEasing })}><option value="ease-in-out">Suave · ease in-out</option><option value="ease-out">Desacelerar · ease out</option><option value="linear">Linear</option></select></label>
+                      <label className="time-inputs webcam-key-time">Tempo do keyframe<input type="number" min={project.trim.start} max={project.trim.end} step="0.05" value={webcamKeyTimeDraft ?? selectedWebcam?.keyframes?.find((key) => Math.abs(key.t - time) < 0.02)?.t ?? time} onFocus={() => setWebcamKeyTimeDraft(selectedWebcam?.keyframes?.find((key) => Math.abs(key.t - time) < 0.02)?.t ?? time)} onChange={(e) => setWebcamKeyTimeDraft(Number(e.target.value))} onBlur={() => { if (webcamKeyTimeDraft !== null) { retimeWebcamKeyframe(webcamKeyTimeDraft); seek(webcamKeyTimeDraft); setWebcamKeyTimeDraft(null); } }} /></label>
+                    </>}
+                    <div className="motion-options"><button onClick={() => { if (currentWebcam) setWebcamClipboard({ t: time, x: currentWebcam.x, y: currentWebcam.y, size: currentWebcam.size, opacity: currentWebcam.opacity, borderRadius: currentWebcam.borderRadius, easing: "ease-in-out" }); }}>Copiar estado</button><button disabled={!webcamClipboard} onClick={() => webcamClipboard && webcamChange(webcamClipboard)}>Colar estado</button></div>
                     <button
                       className="wide danger"
                       onClick={() =>
-                        edit((p) => ({ ...p, version: 8, webcam: undefined }))
+                        edit((p) => ({ ...p, version: 11, webcam: undefined }))
                       }
                     >
                       Remover webcam do vídeo
                     </button>
-                    <p className="help">
-                      O enquadramento e a posição são salvos no projeto e
-                      aplicados na exportação.
-                    </p>
+                    <p className="help">Os marcadores da webcam ficam visíveis na timeline. Entre dois marcadores, posição e tamanho mudam suavemente; a exportação acompanha essa animação.</p>
                   </>
                 ) : (
                   <>
@@ -3265,8 +3579,33 @@ export default function App() {
               <>
                 <div className="panel-title">
                   <h2>Áudio</h2>
-                  <span>Música de fundo</span>
+                  <span>Trilha e efeitos sonoros</span>
                 </div>
+                <h3>Cliques do mouse</h3>
+                <label className="switch-label">
+                  Reproduzir som nos cliques
+                  <input
+                    type="checkbox"
+                    checked={look.clickSounds !== false}
+                    disabled={!canEditCursor || busy}
+                    onChange={(e) => appearance({ clickSounds: e.target.checked })}
+                  />
+                </label>
+                {look.clickSounds !== false && (
+                  <Range
+                    label="Volume dos cliques"
+                    min={0}
+                    max={100}
+                    step={1}
+                    suffix="%"
+                    value={(look.clickSoundVolume ?? 0.3) * 100}
+                    onChange={(value) => setClickSoundVolume(value / 100)}
+                  />
+                )}
+                <p className="help">
+                  Os efeitos acompanham os cliques gravados no preview e no vídeo exportado.
+                </p>
+                <div className="section-line" />
                 {project?.backgroundAudio ? (
                   <>
                     <div className="background-audio-file">
@@ -3598,14 +3937,12 @@ export default function App() {
               ✦ Destacar
             </button>
             <button
-              disabled={
-                busy || (!selected && selectedClip === null && !selectedEffect)
-              }
+              disabled={busy || (!selected && selectedClip === null && !selectedEffect && !webcamKeyed)}
               onClick={deleteSelection}
               title="Apagar seleção · Delete"
             >
               ⌫ Apagar{" "}
-              {selected ? "zoom" : selectedEffect ? "efeito" : "trecho"}
+              {selected ? "zoom" : selectedEffect ? "efeito" : webcamKeyed ? "ajuste webcam" : "trecho"}
             </button>
             <button
               disabled={!project?.zooms.length || busy}
@@ -3732,6 +4069,44 @@ export default function App() {
               </span>
             )}
           </div>
+          <div className={`webcam-track ${project?.webcam ? "enabled" : "empty"}`} aria-label="Trilha independente da webcam">
+            <span className="webcam-track-title">Webcam</span>
+            {selectedWebcam?.keyframes?.map((key, index) => (
+              <button
+                key={`${key.t}-${index}`}
+                className={`webcam-keyframe ${Math.abs(key.t - time) < 0.02 ? "active" : ""}`}
+                style={{ left: `${100 * key.t / (media?.duration || 1)}%` }}
+                onClick={() => {
+                  setSelected(null);
+                  setSelectedEffect(null);
+                  setSelectedClip(null);
+                  setPanel("webcam");
+                  seek(key.t);
+                }}
+                title={`Keyframe da webcam ${index + 1} · ${clock(key.t)}`}
+                aria-label={`Selecionar movimento da webcam em ${clock(key.t)}`}
+                aria-pressed={Math.abs(key.t - time) < 0.02}
+              />
+            ))}
+            {project?.webcam ? (
+              <button
+                className={`webcam-track-add ${webcamKeyed ? "active" : ""}`}
+                disabled={busy}
+                onClick={() => {
+                  setSelected(null);
+                  setSelectedEffect(null);
+                  setSelectedClip(null);
+                  setPanel("webcam");
+                  toggleWebcamKeyframe();
+                }}
+                title={webcamKeyed ? "Remover o ajuste da webcam no marcador" : "Adicionar keyframe independente da webcam no marcador"}
+                aria-label={webcamKeyed ? "Remover ajuste da webcam no marcador" : "Adicionar ajuste da webcam no marcador"}
+              >{webcamKeyed ? "−" : "+"}</button>
+            ) : (
+              <small className="webcam-track-hint">Ative a webcam para editar esta trilha</small>
+            )}
+            {project?.webcam && !selectedWebcam?.keyframes?.length && <small className="webcam-track-hint">Posição fixa · adicione keyframes no marcador</small>}
+          </div>
           <div
             className="zoom-track"
             onClick={(e) => {
@@ -3740,6 +4115,7 @@ export default function App() {
               addZoom(((e.clientX - rect.left) / rect.width) * media.duration);
             }}
           >
+            <span className="zoom-track-title">Zoom da tela</span>
             {project?.zooms.map((z) => (
               <button
                 key={z.id}

@@ -32,6 +32,10 @@ with tempfile.TemporaryDirectory(prefix="frame-test-") as folder:
     compile_swift(sampling_source, sampling_check)
     run("node", "--experimental-strip-types", "tests/motion-parity-fixture.ts", str(sampling_cases))
     print(run(str(sampling_check), str(sampling_cases)).strip())
+    webcam_source, webcam_check = folder / "webcam-sampling.swift", folder / "webcam-sampling"
+    webcam_source.write_text((ROOT / "src-tauri/native/FrameNative.swift").read_text().split("@main struct Main")[0] + (ROOT / "tests/WebcamSampling.swift").read_text())
+    compile_swift(webcam_source, webcam_check)
+    print(run(str(webcam_check)).strip())
     source, audio = folder / "source.mov", folder / "audio.mov"
     run(str(fixture), str(source))
     run(str(add_audio), str(source), str(audio))
@@ -39,6 +43,9 @@ with tempfile.TemporaryDirectory(prefix="frame-test-") as folder:
     jobfile, destination = folder / "job.json", folder / "output.mp4"
     run("node", "--experimental-strip-types", "tests/export-fixture.ts", str(source), str(destination), str(jobfile))
     job = json.loads(jobfile.read_text())
+    # Give the primary audio assertion a full-length source track; the source
+    # click sample is intentionally short and by itself need not span the video.
+    job["source"] = str(audio)
 
     def export_job(settings, cancel=False):
         jobfile.write_text(json.dumps(settings))
@@ -64,6 +71,13 @@ with tempfile.TemporaryDirectory(prefix="frame-test-") as folder:
         return log.read_text()
 
     export_job(job)
+    print(run(str(checker), str(destination), "--audio").strip(), "with synchronized mouse-click audio")
+    silent_job = dict(job)
+    silent_job["appearance"] = {**job["appearance"], "clickSounds": False}
+    silent_job["source"] = str(source)
+    silent_job["destination"] = str(folder / "clicks-disabled.mp4")
+    export_job(silent_job)
+    print(run(str(checker), silent_job["destination"], "--no-audio").strip(), "with mouse-click audio disabled")
     print(run(str(checker), str(destination), "--geometry", str(jobfile)).strip(), "with camera geometry checked")
     for aspect in ["9:16", "1:1"]:
         job["appearance"]["aspect"] = aspect

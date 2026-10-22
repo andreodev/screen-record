@@ -1,10 +1,10 @@
 export type Point = { x: number; y: number };
-export type CursorEvent = Point & { t: number; down: boolean; rightDown?: boolean; middleDown?: boolean; kind?: string };
+export type CursorEvent = Point & { t: number; down: boolean; rightDown?: boolean; middleDown?: boolean; kind?: string; typing?: boolean };
 export type Zoom = Point & { id: string; start: number; end: number; scale: number; enabled: boolean; follow?: boolean; instant?: boolean; manualOverride?: boolean; roiWidth?: number; roiHeight?: number };
 export type Camera = Point & { scale: number };
 export type CameraKey = Camera & { t: number; cut?: boolean };
 export type CameraFrame = { left: number; top: number; width: number; height: number };
-export type Appearance = { background: number; padding: number; radius: number; shadow: number; cursorSize: number; smooth: boolean; aspect: string; cropFill?: boolean; cropFollowCursor?: boolean; cameraMode?: "auto" | "manual" | "hybrid"; backgroundMode?: "gradient" | "color" | "wallpaper" | "video-blur"; colors?: [string, string]; cursorSmooth?: boolean; wallpaper?: string; cursorAsset?: string; cursorTheme?: string; backgroundBlur?: number; cursorMotion?: "original" | "smooth" | "medium" | "rapid"; cameraSpring?: boolean; motionBlur?: { cursor: number; zoom: number; pan: number } };
+export type Appearance = { background: number; padding: number; radius: number; shadow: number; cursorSize: number; smooth: boolean; aspect: string; cropFill?: boolean; cropFollowCursor?: boolean; cameraMode?: "auto" | "manual" | "hybrid"; backgroundMode?: "gradient" | "color" | "wallpaper" | "video-blur"; colors?: [string, string]; cursorSmooth?: boolean; wallpaper?: string; cursorAsset?: string; cursorTheme?: string; backgroundBlur?: number; cursorMotion?: "original" | "smooth" | "medium" | "rapid"; cameraSpring?: boolean; motionBlur?: { cursor: number; zoom: number; pan: number }; clickSounds?: boolean; clickSoundVolume?: number };
 export function cursorMotionFor(appearance: Appearance): NonNullable<Appearance["cursorMotion"]> {
   return appearance.cursorMotion ?? (appearance.cursorSmooth === false ? "original" : "medium");
 }
@@ -12,7 +12,7 @@ export const backgrounds = [
   ["#25243d", "#7c6a9e"], ["#112e3b", "#45a7ac"], ["#512e53", "#eb9a89"],
   ["#182b33", "#538367"], ["#171719", "#35353c"], ["#6b3e81", "#d574ae"],
 ];
-export const defaults: Appearance = { background: 0, padding: 9, radius: 12, shadow: 35, cursorSize: 24, cursorTheme: "macos", smooth: true, aspect: "auto", cameraMode: "hybrid" };
+export const defaults: Appearance = { background: 0, padding: 9, radius: 12, shadow: 35, cursorSize: 24, cursorTheme: "macos", smooth: true, aspect: "auto", cameraMode: "hybrid", clickSounds: true, clickSoundVolume: 0.3 };
 export const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 /** Maps the complete recording layer into the final canvas around a source-space focus point. */
 export function cameraFrame(camera: Camera, frameWidth: number, frameHeight: number, canvasWidth: number, canvasHeight: number): CameraFrame {
@@ -48,7 +48,7 @@ export function cursorAt(t: number, events: CursorEvent[]): CursorEvent | null {
   const a = events[Math.max(0, low - 1)], b = events[Math.min(low, events.length - 1)];
   const u = b.t > a.t ? clamp((t - a.t) / (b.t - a.t), 0, 1) : 0;
   // Spatial smoothing is computed once; easing each tiny sample would repeatedly stop the cursor.
-  return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, t, down: a.down, rightDown: a.rightDown, middleDown: a.middleDown, kind: a.kind };
+  return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, t, down: a.down, rightDown: a.rightDown, middleDown: a.middleDown, kind: a.kind, typing: a.typing };
 }
 function blendZoom(camera: Camera, z: Zoom, t: number, smooth: boolean, spanX = 1, spanY = 1): Camera {
   if (!z.enabled || t < z.start || t >= z.end || z.end <= z.start) return camera;
@@ -74,7 +74,7 @@ export function cameraAt(t: number, zooms: Zoom[], smooth = true): Camera {
 }
 export function autoZooms(events: CursorEvent[], duration: number): Zoom[] {
   const actions: {t:number;x:number;y:number;scale:number}[] = [];
-  let lastPressed = false, travel = 0, lastMovement = events[0]?.t ?? 0, lastMovePoint = events[0], lastIntent = -Infinity;
+  let lastPressed = false, travel = 0, lastMovement = events[0]?.t ?? 0, lastMovePoint = events[0], lastIntent = -Infinity, lastTyping = -Infinity;
   for (let i = 0; i < events.length; i++) {
     const e = events[i], previous = events[i - 1];
     if (e.t < 0 || e.t > duration) continue;
@@ -85,6 +85,10 @@ export function autoZooms(events: CursorEvent[], duration: number): Zoom[] {
     }
     if (pressed && !lastPressed) {
       actions.push({t:e.t,x:e.x,y:e.y,scale:1.65}); lastIntent = e.t; travel = 0;
+    } else if (e.typing && e.t - lastTyping >= 1.05) {
+      // Key events are impulses; throttle them into a sustained typing scene.
+      // Repeated events in the same region extend the current focus below.
+      actions.push({t:e.t,x:e.x,y:e.y,scale:1.5}); lastTyping = e.t; lastIntent = e.t; travel = 0;
     } else if (!pressed && travel >= .16 && e.t - lastMovement >= .32 && e.t - lastIntent >= 1.15 && lastMovePoint) {
       actions.push({t:e.t,x:lastMovePoint.x,y:lastMovePoint.y,scale:1.4}); lastIntent = e.t; travel = 0;
     }

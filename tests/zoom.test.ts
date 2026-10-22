@@ -21,6 +21,16 @@ assert.equal(zoomsForMode([{ ...zooms[0]!, manualOverride: true }], 'manual').le
 assert.equal(autoZooms([{t:0,x:.1,y:.1,down:false},{t:.1,x:.3,y:.2,down:false},{t:.2,x:.3,y:.2,down:false},{t:.45,x:.3,y:.2,down:false},{t:.5,x:.3,y:.2,down:false}], 2)[0]?.scale, 1.4, 'A significant move followed by a dwell should create one softer focus');
 assert.equal(autoZooms([{t:0,x:.5,y:.5,down:false},{t:.1,x:.51,y:.5,down:false},{t:.5,x:.51,y:.5,down:false}], 2).length, 0, 'Small pointer movements should not trigger a zoom');
 assert.equal(autoZooms([{t:0,x:.2,y:.4,down:false},{t:.5,x:.2,y:.4,down:false,rightDown:true},{t:.55,x:.2,y:.4,down:false,rightDown:false}], 2).length, 1, 'Right-click interactions should be recognized');
+const typingScene = autoZooms([
+  {t:0,x:.7,y:.6,down:false},
+  {t:.5,x:.7,y:.6,down:false,typing:true},
+  {t:1.6,x:.7,y:.6,down:false,typing:true},
+  {t:2.7,x:.7,y:.6,down:false,typing:true},
+], 5);
+assert.equal(typingScene.length, 1, 'A typing burst in one region should remain a single camera scene');
+assert.equal(typingScene[0]?.x, .7, 'Typing focus should use the pointer location where typing started');
+assert.ok(Math.abs((typingScene[0]?.end ?? 0) - 4.3) < 1e-9, 'Continued typing should extend the same focus instead of returning to overview');
+assert.equal(cursorAt(1.6, [{t:1.6,x:.7,y:.6,down:false,typing:true}])?.typing, true, 'Typing intent survives cursor sampling');
 assert.equal(autoZooms([{t:0,x:.1,y:.1,down:false},{t:.2,x:.1,y:.1,down:true},{t:.25,x:.1,y:.1,down:false},{t:.7,x:.9,y:.9,down:true},{t:.75,x:.9,y:.9,down:false}], 3).length, 1, 'A distant second interaction inside the camera cooldown should not trigger a jolt');
 assert.deepEqual(autoZooms(events.map(e => ({ ...e, down: false })), 6), []);
 assert.equal(cursorAt(0, []), null);

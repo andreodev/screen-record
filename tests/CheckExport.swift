@@ -121,7 +121,10 @@ func require(_ condition: @autoclosure () -> Bool, _ message: String = "Export a
         if CommandLine.arguments.contains("--audio") {
             require(audioTracks.count == 1, "Missing exported audio")
             let audioDuration = try await audioTracks[0].load(.timeRange).duration.seconds
-            require(abs(audioDuration - duration) < 0.1, "Audio duration mismatch")
+            require(abs(audioDuration - duration) < 0.1, "Audio duration mismatch: \(audioDuration) vs \(duration)")
+        }
+        if CommandLine.arguments.contains("--no-audio") {
+            require(audioTracks.isEmpty, "Unexpected audio when click sounds are disabled")
         }
         print("Export validated: \(size.width)×\(size.height), \(duration)s, \(fps) fps")
     }

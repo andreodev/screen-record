@@ -12,6 +12,7 @@ pub(crate) struct Recorder {
     latest: Mutex<Option<PathBuf>>,
     media: Mutex<Option<studio::Media>>,
     control: Mutex<Option<std::process::ChildStdin>>,
+    camera_preview_control: Mutex<Option<std::process::ChildStdin>>,
     project_path: Mutex<Option<PathBuf>>,
     pending_project: Mutex<Option<PathBuf>>,
 }
@@ -20,7 +21,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(Recorder::default())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![studio::import_video, studio::choose_background_audio, studio::open_project, studio::save_project, studio::autosave_project, studio::take_pending_project, studio::start_recording, studio::stop_operation, studio::export_video, studio::reveal_clip, studio::studio_asset_root, studio::open_screen_recording_settings, benchmark::benchmark_config, benchmark::report_preview_benchmark])
+        .invoke_handler(tauri::generate_handler![studio::import_video, studio::choose_background_audio, studio::open_project, studio::save_project, studio::autosave_project, studio::take_pending_project, studio::start_camera_preview, studio::stop_camera_preview, studio::open_camera_settings, studio::start_recording, studio::stop_operation, studio::export_video, studio::reveal_clip, studio::studio_asset_root, studio::open_screen_recording_settings, benchmark::benchmark_config, benchmark::report_preview_benchmark])
         .setup(|app| {
             if let Some(config) = benchmark::config()? {
                 if let Some(project) = config["project"].as_str() { *app.state::<Recorder>().pending_project.lock().unwrap_or_else(|e| e.into_inner()) = Some(PathBuf::from(project));
@@ -41,6 +42,8 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle().clone();
+                let _ = studio::stop_camera_preview(app);
                 if window.state::<Recorder>().busy.load(std::sync::atomic::Ordering::SeqCst) { api.prevent_close(); }
             }
         })

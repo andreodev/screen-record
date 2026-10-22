@@ -4,10 +4,12 @@ import ScreenCaptureKit
 import CoreImage
 
 struct Failure: LocalizedError { let message: String; var errorDescription: String? { message } }
+let emitLock = NSLock()
 func emit(_ value: [String: Any]) {
+    emitLock.lock(); defer { emitLock.unlock() }
     if let data = try? JSONSerialization.data(withJSONObject: value), let text = String(data: data, encoding: .utf8) { print(text); fflush(stdout) }
 }
-struct Pointer: Codable { var t: Double; var x: Double; var y: Double; var down: Bool; var kind: String? = nil; var rightDown: Bool? = nil; var middleDown: Bool? = nil }
+struct Pointer: Codable { var t: Double; var x: Double; var y: Double; var down: Bool; var kind: String? = nil; var rightDown: Bool? = nil; var middleDown: Bool? = nil; var typing: Bool? = nil }
 struct Media: Codable { var path: String; var duration: Double; var width: Int; var height: Int; var cursor: [Pointer]; var cursorCaptured: Bool }
 func metadata(_ path: String) async throws -> Media {
     let asset = AVURLAsset(url: URL(fileURLWithPath: path))
@@ -47,6 +49,35 @@ func videoBitrate(width: Int, height: Int, fps: Int) -> Int {
     return Int(pixelRate * (12_000_000.0 / 62_208_000.0))
 }
 
+final class CameraPreview: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+    let session = AVCaptureSession()
+    let queue = DispatchQueue(label: "frame.camera.preview")
+    let context = CIContext(options: [.useSoftwareRenderer: false])
+    var lastFrame = Date.distantPast
+    func start() throws {
+        guard let device = AVCaptureDevice.default(for: .video) else { throw Failure(message: "Nenhuma webcam disponível.") }
+        session.beginConfiguration()
+        if session.canSetSessionPreset(.vga640x480) { session.sessionPreset = .vga640x480 }
+        let input = try AVCaptureDeviceInput(device: device)
+        let output = AVCaptureVideoDataOutput()
+        output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+        output.alwaysDiscardsLateVideoFrames = true
+        output.setSampleBufferDelegate(self, queue: queue)
+        guard session.canAddInput(input), session.canAddOutput(output) else { throw Failure(message: "A webcam não pode iniciar neste Mac.") }
+        session.addInput(input); session.addOutput(output); session.commitConfiguration()
+        session.startRunning()
+    }
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        let now = Date()
+        guard now.timeIntervalSince(lastFrame) >= 0.12, let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        lastFrame = now
+        let image = CIImage(cvPixelBuffer: buffer)
+        guard let cgImage = context.createCGImage(image, from: image.extent),
+              let data = NSBitmapImageRep(cgImage: cgImage).representation(using: .jpeg, properties: [.compressionFactor: 0.58]) else { return }
+        emit(["event": "camera-frame", "data": data.base64EncodedString()])
+    }
+}
+
 // shortcut: polling at 120 Hz may miss brief clicks; replace with a mouse-only event tap when integrating its permissions.
 final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoDataOutputSampleBufferDelegate {
     let queue = DispatchQueue(label: "frame.capture")
@@ -63,6 +94,8 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoD
     var cameraAdaptor: AVAssetWriterInputPixelBufferAdaptor?
     var cameraPath: String?
     var cameraFailure: Error?
+    let cameraPreviewContext = CIContext(options: [.useSoftwareRenderer: false])
+    var lastCameraPreviewTime = Date.distantPast
     var stream: SCStream?
     var timer: DispatchSourceTimer?
     var start: CMTime?
@@ -72,6 +105,7 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoD
     var lastReportedTime = -1.0
     var cursorKind: String?
     var cursorTimer: DispatchSourceTimer?
+    var keyMonitor: Any?
     var failure: Error?
     init(path: String, bounds: CGRect, width: Int, height: Int, fps: Int = 60, cameraPath: String? = nil) throws {
         self.path = path; self.bounds = bounds; self.fps = fps
@@ -110,6 +144,16 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoD
     }
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let screenStart = start, let image = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let now = Date()
+        if now.timeIntervalSince(lastCameraPreviewTime) >= 0.15 {
+            lastCameraPreviewTime = now
+            let frame = CIImage(cvPixelBuffer: image)
+            let preview = frame.transformed(by: CGAffineTransform(scaleX: min(1, 480 / frame.extent.width), y: min(1, 480 / frame.extent.width)))
+            if let cgImage = cameraPreviewContext.createCGImage(preview, from: preview.extent),
+               let data = NSBitmapImageRep(cgImage: cgImage).representation(using: .jpeg, properties: [.compressionFactor: 0.58]) {
+                emit(["event": "camera-frame", "data": data.base64EncodedString()])
+            }
+        }
         let pts = CMTimeSubtract(CMSampleBufferGetPresentationTimeStamp(sampleBuffer), screenStart)
         guard pts >= .zero else { return }
         if cameraWriter == nil {
@@ -144,6 +188,19 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoD
             self?.queue.async { [weak self] in self?.cursorKind = kind }
         }
         self.cursorTimer = cursorTimer; cursorTimer.resume()
+        // A global monitor observes key-down timing only. We intentionally discard
+        // the key and never store typed text; the last sampled pointer is the focus hint.
+        keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] _ in
+            guard let self = self, let captureStart = self.start else { return }
+            let time = CMTimeSubtract(CMClockGetTime(CMClockGetHostTimeClock()), captureStart).seconds
+            guard time.isFinite, time >= 0 else { return }
+            self.queue.async { [weak self] in
+                guard let self = self, let previous = self.pointers.last else { return }
+                let event = Pointer(t: time, x: previous.x, y: previous.y, down: previous.down, kind: previous.kind, rightDown: previous.rightDown, middleDown: previous.middleDown, typing: true)
+                if let index = self.pointers.firstIndex(where: { $0.t > time }) { self.pointers.insert(event, at: index) }
+                else { self.pointers.append(event) }
+            }
+        }
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now(), repeating: 1.0 / 120)
         timer.setEventHandler { [weak self] in
@@ -161,6 +218,7 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoD
     }
     func finish() async throws {
         cursorTimer?.cancel(); cursorTimer = nil
+        if let keyMonitor = keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
         try await stream?.stopCapture()
         if let session = cameraSession { cameraSessionQueue.sync { session.stopRunning() }; cameraQueue.sync {} }
         if let cameraFailure = cameraQueue.sync(execute: { self.cameraFailure }) { writer.cancelWriting(); cameraWriter?.cancelWriting(); throw cameraFailure }
@@ -192,11 +250,12 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoD
 }
 
 struct Key: Codable { let t: Double; let x: Double; let y: Double; let scale: Double; var cut: Bool? = nil }
-struct Look: Codable { let background: Int; let padding: Double; let radius: Double; let shadow: Double; let cursorSize: Double; let smooth: Bool; let aspect: String; let cropFill: Bool?; let cropFollowCursor: Bool?; let cameraMode: String?; let colors: [String]?; let backgroundMode: String?; let cursorSmooth: Bool?; let wallpaper: String?; let cursorAsset: String?; let cursorTheme: String?; let backgroundBlur: Double?; let motionBlur: MotionBlur? }
+struct Look: Codable { let background: Int; let padding: Double; let radius: Double; let shadow: Double; let cursorSize: Double; let smooth: Bool; let aspect: String; let cropFill: Bool?; let cropFollowCursor: Bool?; let cameraMode: String?; let colors: [String]?; let backgroundMode: String?; let cursorSmooth: Bool?; let wallpaper: String?; let cursorAsset: String?; let cursorTheme: String?; let backgroundBlur: Double?; let motionBlur: MotionBlur?; let clickSounds: Bool?; let clickSoundVolume: Double? }
 struct MotionBlur: Codable { let cursor: Double; let zoom: Double; let pan: Double }
 struct Effect: Codable { let id: String; let kind: String; let start: Double; let end: Double; let x: Double; let y: Double; let width: Double; let height: Double; let opacity: Double }
 struct BackgroundAudio: Codable { let path: String; let volume: Double }
-struct Webcam: Codable { let path: String; let x: Double; let y: Double; let size: Double; let shape: String }
+struct WebcamKeyframe: Codable { let t: Double; let x: Double; let y: Double; let size: Double; let opacity: Double?; let borderRadius: Double?; let easing: String? }
+struct Webcam: Codable { let path: String; let x: Double; let y: Double; let size: Double; let shape: String; let keyframes: [WebcamKeyframe]?; let mode: String?; let opacity: Double?; let border: Double?; let shadow: Double?; let borderRadius: Double? }
 struct ClipRange: Codable { let start: Double; let end: Double; var speed: Double? = nil; var hideCursor: Bool? = nil; var cursorOriginal: Bool? = nil; var rate: Double { speed ?? 1 }; var duration: Double { (end - start) / rate } }
 struct ExportJob: Codable { let source: String; let destination: String; let start: Double; let end: Double; let appearance: Look; let keys: [Key]; let cursor: [Pointer]; let cursorCaptured: Bool; let assetsRoot: String?; let resolution: Int?; let fps: Int?; let ranges: [ClipRange]?; let rawCursor: [Pointer]?; let effects: [Effect]?; let backgroundAudio: BackgroundAudio?; let webcam: Webcam? }
 final class Cancellation: @unchecked Sendable { let lock = NSLock(); var value = false; func cancel() { lock.lock(); value = true; lock.unlock() }; var cancelled: Bool { lock.lock(); defer { lock.unlock() }; return value } }
@@ -209,13 +268,39 @@ func camera(_ time: Double, _ keys: [Key]) -> Key {
     let u = b.t > a.t && b.cut != true ? max(0, min(1, (time - a.t) / (b.t - a.t))) : 0
     return Key(t: time, x: mix(a.x, b.x, u), y: mix(a.y, b.y, u), scale: mix(a.scale, b.scale, u))
 }
+func webcamState(_ webcam: Webcam, _ time: Double) -> WebcamKeyframe {
+    let opacity = webcam.opacity ?? 1, radius = webcam.borderRadius ?? (webcam.shape == "circle" ? 0.5 : webcam.shape == "rounded" ? 0.18 : 0)
+    if webcam.mode == "static" { return WebcamKeyframe(t: time, x: webcam.x, y: webcam.y, size: webcam.size, opacity: opacity, borderRadius: radius, easing: "linear") }
+    let keys = webcam.keyframes ?? []
+    guard !keys.isEmpty else { return WebcamKeyframe(t: time, x: webcam.x, y: webcam.y, size: webcam.size, opacity: opacity, borderRadius: radius, easing: "linear") }
+    guard let next = keys.firstIndex(where: { $0.t >= time }) else { return keys[keys.count - 1] }
+    if next == 0 { return keys[0] }
+    let a = keys[next - 1], b = keys[next], raw = b.t > a.t ? max(0, min(1, (time - a.t) / (b.t - a.t))) : 0
+    let amount = webcamEase(raw, a.easing ?? "ease-in-out")
+    return WebcamKeyframe(t: time, x: mix(a.x, b.x, amount), y: mix(a.y, b.y, amount), size: mix(a.size, b.size, amount), opacity: mix(a.opacity ?? opacity, b.opacity ?? opacity, amount), borderRadius: mix(a.borderRadius ?? radius, b.borderRadius ?? radius, amount), easing: a.easing)
+}
+func webcamEase(_ value: Double, _ easing: String) -> Double {
+    let t = max(0, min(1, value))
+    switch easing { case "linear": return t; case "ease-out": return 1 - pow(1 - t, 3); default: return t * t * (3 - 2 * t) }
+}
+func plannedWebcamState(_ state: WebcamKeyframe, _ mode: String?, _ cameraScale: Double, _ aspect: String, _ sizeFactor: Double) -> WebcamKeyframe {
+    guard mode == "auto" || mode == "hybrid" else { return state }
+    let side = state.size * sizeFactor
+    let overlappingFocus = abs(state.x - 0.5) < side / 2 + 0.025 && abs(state.y - 0.5) < side / 2 + 0.025
+    let margin = max(state.size / 2, side / 2 + 0.025)
+    let candidates = [(1 - margin, 1 - margin), (margin, 1 - margin), (1 - margin, margin), (margin, margin)]
+    let target = overlappingFocus ? candidates.max { hypot($0.0 - 0.5, $0.1 - 0.5) < hypot($1.0 - 0.5, $1.1 - 0.5) }! : (state.x, state.y)
+    let raw = mode == "auto" ? max(0, min(1, (cameraScale - 1.05) / 0.45)) : overlappingFocus ? max(0, min(1, (cameraScale - 1.08) / 0.42)) : 0
+    let amount = webcamEase(raw, "ease-in-out")
+    return WebcamKeyframe(t: state.t, x: mix(state.x, target.0, amount), y: mix(state.y, target.1, amount), size: mode == "auto" ? state.size * (1 - amount * 0.16) : state.size, opacity: state.opacity, borderRadius: state.borderRadius, easing: state.easing)
+}
 func pointer(_ time: Double, _ events: [Pointer]) -> Pointer? {
     guard !events.isEmpty else { return nil }
     var low = 0, high = events.count
     while low < high { let m = (low + high) / 2; if events[m].t <= time { low = m + 1 } else { high = m } }
     let a = events[max(0, low - 1)], b = events[min(low, events.count - 1)]
     let u = b.t > a.t ? max(0, min(1, (time - a.t) / (b.t - a.t))) : 0
-    return Pointer(t: time, x: mix(a.x, b.x, u), y: mix(a.y, b.y, u), down: a.down, kind: a.kind)
+    return Pointer(t: time, x: mix(a.x, b.x, u), y: mix(a.y, b.y, u), down: a.down, kind: a.kind, rightDown: a.rightDown, middleDown: a.middleDown, typing: a.typing)
 }
 func motionFrames(_ t: Double, keys: [Key], events: [Pointer], range: ClipRange, blur: MotionBlur?, cuts: [Double], spanX: Double = 1, spanY: Double = 1) -> [(Key, Pointer?)] {
     let current = camera(t, keys), point = range.hideCursor == true ? nil : pointer(t, events)
@@ -284,6 +369,44 @@ func exportVideo(_ job: ExportJob, cancel: Cancellation) async throws {
         }
         musicTrack = track
     }
+    var clickTracks: [AVMutableCompositionTrack] = []
+    let clickVolume = job.appearance.clickSoundVolume ?? 0.3
+    if job.appearance.clickSounds != false, clickVolume > 0, let root = job.assetsRoot {
+        let clickURL = URL(fileURLWithPath: root).appendingPathComponent("mouse-click.wav")
+        guard FileManager.default.fileExists(atPath: clickURL.path) else { throw Failure(message: "Som de clique não encontrado na biblioteca do aplicativo.") }
+        let clickAsset = AVURLAsset(url: clickURL)
+        guard let sourceClick = try await clickAsset.loadTracks(withMediaType: .audio).first else { throw Failure(message: "O efeito de clique não contém áudio.") }
+        let availableClickDuration = try await clickAsset.load(.duration).seconds
+        guard availableClickDuration.isFinite && availableClickDuration > 0 else { throw Failure(message: "Duração do efeito de clique inválida.") }
+        let cursorEvents = job.rawCursor.flatMap { $0.isEmpty ? nil : $0 } ?? job.cursor
+        var clickTimes: [Double] = [], wasPressed = false
+        for point in cursorEvents {
+            let pressed = point.down || point.rightDown == true || point.middleDown == true
+            if pressed && !wasPressed { clickTimes.append(point.t) }
+            wasPressed = pressed
+        }
+        var clickTrackEnds: [Double] = [], outputOffset = 0.0
+        for range in ranges {
+            for sourceTime in clickTimes where sourceTime >= range.start && sourceTime < range.end {
+                let outputTime = outputOffset + (sourceTime - range.start) / range.rate
+                let sampleDuration = min(availableClickDuration, max(0, duration - outputTime))
+                guard sampleDuration > 0 else { continue }
+                let trackIndex: Int
+                if let reusable = clickTrackEnds.firstIndex(where: { $0 <= outputTime + 0.000001 }) {
+                    trackIndex = reusable
+                } else {
+                    guard let newTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else { throw Failure(message: "Não foi possível criar a faixa de efeitos sonoros.") }
+                    clickTracks.append(newTrack); clickTrackEnds.append(0)
+                    trackIndex = clickTracks.count - 1
+                }
+                let at = CMTime(seconds: outputTime, preferredTimescale: 60000)
+                let segment = CMTimeRange(start: .zero, duration: CMTime(seconds: sampleDuration, preferredTimescale: 60000))
+                try clickTracks[trackIndex].insertTimeRange(segment, of: sourceClick, at: at)
+                clickTrackEnds[trackIndex] = outputTime + sampleDuration
+            }
+            outputOffset += range.duration
+        }
+    }
     guard let composedTrack = try await composition.loadTracks(withMediaType: .video).first else { throw Failure(message: "Cortes sem vídeo.") }
     let transform = try await track.load(.preferredTransform)
     let natural = try await track.load(.naturalSize)
@@ -332,10 +455,16 @@ func exportVideo(_ job: ExportJob, cancel: Cancellation) async throws {
     var audioOutput: AVAssetReaderAudioMixOutput?
     if !audioTracks.isEmpty {
         let ao = AVAssetReaderAudioMixOutput(audioTracks: audioTracks, audioSettings: [AVFormatIDKey: kAudioFormatLinearPCM]); ao.audioTimePitchAlgorithm = .spectral
+        var parameters: [AVAudioMixInputParameters] = []
         if let musicTrack = musicTrack, let music = job.backgroundAudio {
-            let parameters = AVMutableAudioMixInputParameters(track: musicTrack); parameters.setVolume(Float(music.volume), at: .zero)
-            let mix = AVMutableAudioMix(); mix.inputParameters = [parameters]; ao.audioMix = mix
+            let musicParameters = AVMutableAudioMixInputParameters(track: musicTrack); musicParameters.setVolume(Float(music.volume), at: .zero)
+            parameters.append(musicParameters)
         }
+        for clickTrack in clickTracks {
+            let clickParameters = AVMutableAudioMixInputParameters(track: clickTrack); clickParameters.setVolume(Float(clickVolume), at: .zero)
+            parameters.append(clickParameters)
+        }
+        if !parameters.isEmpty { let mix = AVMutableAudioMix(); mix.inputParameters = parameters; ao.audioMix = mix }
         reader.add(ao); audioOutput = ao
     }
     let destination = URL(fileURLWithPath: job.destination)
@@ -467,18 +596,33 @@ func exportVideo(_ job: ExportJob, cancel: Cancellation) async throws {
             }
             var composed = frame.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: frameBackground, kCIInputMaskImageKey: activeMask]).cropped(to: canvas)
             if let webcam = job.webcam, let sample = heldWebcamSample, let cameraBuffer = CMSampleBufferGetImageBuffer(sample) {
+                let webcamPosition = plannedWebcamState(webcamState(webcam, sourceTime), webcam.mode, frameCam.scale, job.appearance.aspect, job.appearance.aspect == "9:16" ? 0.65 : 1.0)
                 let raw = CIImage(cvPixelBuffer: cameraBuffer).transformed(by: webcamTransform)
                 let upright = raw.transformed(by: CGAffineTransform(translationX: -raw.extent.minX, y: -raw.extent.minY))
-                let side = min(vw, vh) * webcam.size * frameCam.scale
-                let centerX = w / 2 + (webcam.x - frameCam.x) * vw * frameCam.scale
-                let centerY = h / 2 + (frameCam.y - webcam.y) * vh * frameCam.scale
+                let portraitScale = job.appearance.aspect == "9:16" ? 0.65 : 1.0
+                let side = min(w, h) * webcamPosition.size * portraitScale
+                let centerX = webcamPosition.x * w
+                let centerY = (1 - webcamPosition.y) * h
                 let cameraRect = CGRect(x: centerX - side / 2, y: centerY - side / 2, width: side, height: side)
                 if !cameraRect.intersection(canvas).isNull && !cameraRect.intersection(canvas).isEmpty {
-                    let cover = max(side / upright.extent.width, side / upright.extent.height), scaled = upright.transformed(by: CGAffineTransform(scaleX: cover, y: cover))
-                    let cameraImage = scaled.transformed(by: CGAffineTransform(translationX: centerX - scaled.extent.midX, y: centerY - scaled.extent.midY)).cropped(to: cameraRect.intersection(canvas))
-                    let cameraRadius = webcam.shape == "circle" ? side / 2 : webcam.shape == "rounded" ? side * 0.16 : 0
-                    let cameraMask = CIFilter(name: "CIRoundedRectangleGenerator", parameters: ["inputExtent": CIVector(cgRect: cameraRect), "inputRadius": cameraRadius, "inputColor": CIColor.white])!.outputImage!.cropped(to: canvas)
-                    composed = cameraImage.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: composed, kCIInputMaskImageKey: cameraMask]).cropped(to: canvas)
+                    let opacity = max(0, min(1, webcamPosition.opacity ?? webcam.opacity ?? 1))
+                    let border = max(0, min(side * 0.08, (webcam.border ?? 2) * w / 1000))
+                    let radius = webcam.shape == "circle" ? side / 2 : side * max(0, min(0.5, webcamPosition.borderRadius ?? webcam.borderRadius ?? (webcam.shape == "rounded" ? 0.18 : 0)))
+                    let outerMask = CIFilter(name: "CIRoundedRectangleGenerator", parameters: ["inputExtent": CIVector(cgRect: cameraRect), "inputRadius": radius, "inputColor": CIColor(red: 1, green: 1, blue: 1, alpha: opacity)])!.outputImage!.cropped(to: canvas)
+                    let shadowStrength = max(0, min(1, (webcam.shadow ?? 35) / 100))
+                    if shadowStrength > 0 {
+                        let shadow = outerMask.transformed(by: CGAffineTransform(translationX: 0, y: -side * 0.025)).applyingGaussianBlur(sigma: side * 0.055).cropped(to: canvas)
+                        let shadowColor = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: shadowStrength)).cropped(to: canvas)
+                        composed = shadowColor.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: composed, kCIInputMaskImageKey: shadow]).cropped(to: canvas)
+                    }
+                    let borderColor = CIImage(color: CIColor.white).cropped(to: cameraRect).applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: composed, kCIInputMaskImageKey: outerMask])
+                    let inset = border
+                    let innerRect = cameraRect.insetBy(dx: inset, dy: inset)
+                    let innerRadius = max(0, radius - inset)
+                    let innerMask = CIFilter(name: "CIRoundedRectangleGenerator", parameters: ["inputExtent": CIVector(cgRect: innerRect), "inputRadius": innerRadius, "inputColor": CIColor(red: 1, green: 1, blue: 1, alpha: opacity)])!.outputImage!.cropped(to: canvas)
+                    let cover = max(innerRect.width / upright.extent.width, innerRect.height / upright.extent.height), scaled = upright.transformed(by: CGAffineTransform(scaleX: cover, y: cover))
+                    let cameraImage = scaled.transformed(by: CGAffineTransform(translationX: centerX - scaled.extent.midX, y: centerY - scaled.extent.midY)).cropped(to: innerRect.intersection(canvas))
+                    composed = cameraImage.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: borderColor, kCIInputMaskImageKey: innerMask]).cropped(to: canvas)
                 }
             }
             context.render(composed, to: buffer, bounds: canvas, colorSpace: space)
@@ -529,6 +673,17 @@ func makeCursor(size: Double) -> CIImage {
             let args = CommandLine.arguments
             guard args.count >= 2 else { throw Failure(message: "Comando ausente.") }
             switch args[1] {
+            case "camera-preview":
+                let status = AVCaptureDevice.authorizationStatus(for: .video)
+                let allowed: Bool
+                if status == .authorized { allowed = true }
+                else if status == .notDetermined { allowed = await AVCaptureDevice.requestAccess(for: .video) }
+                else { allowed = false }
+                guard allowed else { throw Failure(message: "Acesso à webcam negado. Autorize a câmera em Ajustes do Sistema > Privacidade e Segurança > Câmera.") }
+                let preview = CameraPreview()
+                try preview.start()
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in DispatchQueue.global().async { _ = readLine(); continuation.resume() } }
+                preview.session.stopRunning()
             case "preview":
                 let source = URL(fileURLWithPath: args[2]), package = URL(fileURLWithPath: args[3])
                 let folder = package.appendingPathComponent("QuickLook", isDirectory: true)
@@ -554,12 +709,13 @@ func makeCursor(size: Double) -> CIImage {
                 }
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                 guard let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) else { throw Failure(message: "Monitor principal não encontrado.") }
+                let ownWindows = content.windows.filter { $0.owningApplication?.processID == ProcessInfo.processInfo.processIdentifier }
                 let config = SCStreamConfiguration()
                 let (width, height) = captureSize(width: CGDisplayPixelsWide(display.displayID), height: CGDisplayPixelsHigh(display.displayID))
                 config.width = width; config.height = height
                 config.minimumFrameInterval = CMTime(value: 1, timescale: 60); config.queueDepth = 3; config.showsCursor = false; config.capturesAudio = false; config.pixelFormat = kCVPixelFormatType_32BGRA
                 let capture = try Capture(path: args[2], bounds: CGDisplayBounds(display.displayID), width: config.width, height: config.height, cameraPath: cameraPath)
-                let stream = SCStream(filter: SCContentFilter(display: display, excludingWindows: []), configuration: config, delegate: capture)
+                let stream = SCStream(filter: SCContentFilter(display: display, excludingWindows: ownWindows), configuration: config, delegate: capture)
                 capture.stream = stream; try stream.addStreamOutput(capture, type: .screen, sampleHandlerQueue: capture.queue)
                 capture.begin(); try await stream.startCapture()
                 // stdin is a private control pipe from Rust; EOF also finalizes the file.
