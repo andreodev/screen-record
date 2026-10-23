@@ -19,8 +19,16 @@ with tempfile.TemporaryDirectory(prefix="frame-test-") as folder:
     folder = Path(folder)
     helper, fixture, add_audio, checker = [folder / x for x in ["native", "fixture", "add-audio", "check"]]
     compile_swift(ROOT / "src-tauri/native/FrameNative.swift", helper)
-    for source, target in [("MakeFixture.swift", fixture), ("AddAudio.swift", add_audio), ("CheckExport.swift", checker)]:
+    for source, target in [("MakeFixture.swift", fixture), ("AddAudio.swift", add_audio), ("CheckExport.swift", checker), ("CheckCapturedAudio.swift", folder / "check-audio")]:
         compile_swift(ROOT / "tests" / source, target)
+    blend_source, blend_check = folder / "motion-blend.swift", folder / "motion-blend"
+    blend_source.write_text((ROOT / "src-tauri/native/FrameNative.swift").read_text().split("@main struct Main")[0] + (ROOT / "tests/BlurCompositing.swift").read_text())
+    compile_swift(blend_source, blend_check)
+    print(run(str(blend_check)).strip())
+    capture_audio_source, capture_audio_check = folder / "capture-audio.swift", folder / "capture-audio"
+    capture_audio_source.write_text((ROOT / "src-tauri/native/FrameNative.swift").read_text().split("@main struct Main")[0] + (ROOT / "tests/CaptureAudio.swift").read_text())
+    compile_swift(capture_audio_source, capture_audio_check)
+    print(run(str(capture_audio_check), str(folder / "capture-audio-files")).strip())
     clock_source, clock_check = folder / "capture-clock.swift", folder / "capture-clock"
     clock_source.write_text((ROOT / "src-tauri/native/FrameNative.swift").read_text().split("@main struct Main")[0] + (ROOT / "tests/CaptureClock.swift").read_text())
     compile_swift(clock_source, clock_check)
@@ -36,6 +44,16 @@ with tempfile.TemporaryDirectory(prefix="frame-test-") as folder:
     webcam_source.write_text((ROOT / "src-tauri/native/FrameNative.swift").read_text().split("@main struct Main")[0] + (ROOT / "tests/WebcamSampling.swift").read_text())
     compile_swift(webcam_source, webcam_check)
     print(run(str(webcam_check)).strip())
+    geometry_source, geometry_check, geometry_cases = folder / "webcam-geometry.swift", folder / "webcam-geometry", folder / "webcam-geometry.json"
+    geometry_source.write_text((ROOT / "src-tauri/native/FrameNative.swift").read_text().split("@main struct Main")[0] + (ROOT / "tests/WebcamGeometry.swift").read_text())
+    compile_swift(geometry_source, geometry_check)
+    print(run("node", "--experimental-strip-types", "tests/webcam-geometry-fixture.ts", str(geometry_cases)).strip())
+    print(run(str(geometry_check), str(geometry_cases)).strip())
+    dynamics_source, dynamics_check, dynamics_cases = folder / "webcam-dynamics.swift", folder / "webcam-dynamics", folder / "webcam-dynamics.json"
+    dynamics_source.write_text((ROOT / "src-tauri/native/FrameNative.swift").read_text().split("@main struct Main")[0] + (ROOT / "tests/WebcamDynamics.swift").read_text())
+    compile_swift(dynamics_source, dynamics_check)
+    print(run("node", "--experimental-strip-types", "tests/webcam-dynamics-fixture.ts", str(dynamics_cases)).strip())
+    print(run(str(dynamics_check), str(dynamics_cases)).strip())
     source, audio = folder / "source.mov", folder / "audio.mov"
     run(str(fixture), str(source))
     run(str(add_audio), str(source), str(audio))
@@ -69,6 +87,21 @@ with tempfile.TemporaryDirectory(prefix="frame-test-") as folder:
         else:
             assert child.returncode == 0, log.read_text() + stderr
         return log.read_text()
+
+    capture_mix = {**job, "start": 0, "end": 3, "sourceVolume": 0.4, "microphone": {"path": str(folder / "capture-audio-files/microphone.m4a"), "volume": 0.7}, "resolution": 720, "cursorCaptured": False, "appearance": {**job["appearance"], "aspect": "16:9", "clickSounds": False}, "destination": str(folder / "captured-audio-mix.mp4")}
+    export_job(capture_mix)
+    mixed_audio = json.loads(run(str(folder / "check-audio"), capture_mix["destination"]))
+    assert mixed_audio["early440"] > 0.015 and mixed_audio["early880"] < 0.003, mixed_audio
+    assert mixed_audio["tone440"] > 0.015 and mixed_audio["tone880"] > 0.04, mixed_audio
+    half_mix = {**capture_mix, "sourceVolume": 0.2, "microphone": {**capture_mix["microphone"], "volume": 0.35}, "destination": str(folder / "captured-audio-half.mp4")}
+    export_job(half_mix)
+    half_audio = json.loads(run(str(folder / "check-audio"), half_mix["destination"]))
+    assert abs(half_audio["tone440"] / mixed_audio["tone440"] - 0.5) < 0.06, half_audio
+    assert abs(half_audio["tone880"] / mixed_audio["tone880"] - 0.5) < 0.06, half_audio
+    cut_mix = {**capture_mix, "ranges": [{"start": 0, "end": 1, "speed": 2}, {"start": 2, "end": 3, "speed": 0.5}], "destination": str(folder / "captured-audio-cuts.mp4")}
+    export_job(cut_mix)
+    print(run(str(checker), cut_mix["destination"], "--duration", "2.5", "--audio").strip(), "with separate microphone, cuts and speed")
+    print("Captured system/microphone audio passed: 250ms startup gap, two tone signals, independent volumes and edited timing.")
 
     export_job(job)
     print(run(str(checker), str(destination), "--audio").strip(), "with synchronized mouse-click audio")

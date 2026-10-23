@@ -1,5 +1,6 @@
 import {writeFileSync} from 'node:fs';
 import {cameraKeys} from '../src/zoom.ts';
+import {cinematicKeys,motionPresets,cameraMotionBlur} from '../src/cinematic.ts';
 import {motionFrames} from '../src/motion.ts';
 import type {Clip} from '../src/timeline.ts';
 
@@ -14,5 +15,10 @@ for (const instant of [false, true]) for (const speed of [.25, 1, 4]) for (const
   for (const t of [.213, .214, .3, .5, .8169, .817, .85]) {
     cases.push({t, keys, cursor, range, blur, cuts, expected: motionFrames(t, keys, cursor, range, blur, cuts)});
   }
+}
+for(const style of ['smooth','cinematic','dynamic'] as const)for(const speed of [.25,1,4])for(const fps of [30,60]){
+ const keys=cinematicKeys(cameraKeys(zooms,2,true,cursor,true,1,1,false,false,16/9,16/9,motionPresets[style].damping),{...motionPresets[style],impacts:[.4]},.82,.82);
+ const cuts=keys.filter(k=>k.cut).map(k=>k.t),range={start:0,end:2,speed},blur=cameraMotionBlur({background:0,padding:9,radius:12,shadow:35,cursorSize:24,smooth:true,aspect:'16:9',cameraMotion:motionPresets[style]});
+ for(let frame=0;frame<fps*2;frame+=3){const t=frame/fps;cases.push({t,keys,cursor,range,blur,cuts,expected:motionFrames(t,keys,cursor,range,blur,cuts)});}
 }
 writeFileSync(process.argv[2], JSON.stringify(cases));

@@ -1,0 +1,7 @@
+.webcam-frame{position:absolute;z-index:6;touch-action:none;cursor:grab;box-sizing:border-box}
+.webcam-frame:active{cursor:grabbing}
+.webcam-visual{width:100%;height:100%;box-sizing:border-box;border-style:solid;border-color:#fff;overflow:hidden}
+.webcam-visual>video,.webcam-visual>img{display:block;width:100%;height:100%;object-fit:cover}
+.webcam-resize{position:absolute;right:-6px;bottom:-6px;width:15px;height:15px;min-width:15px;padding:0;border:2px solid #fff;border-radius:4px;background:#875cff;cursor:nwse-resize;box-shadow:0 1px 5px #0008;z-index:2}
+.webcam-frame.editing::after{content:'';position:absolute;inset:-3px;border:1px dashed #b59aff;border-radius:inherit;pointer-events:none}
+.camera-corners{display:grid;grid-template-columns:repeat(3,1fr)}

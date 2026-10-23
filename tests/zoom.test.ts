@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
-import { autoZooms, cameraAt, cameraFrame, cameraFromKeys, cameraKeys, cameraPoint, cameraViewportTransform, cursorAt, visibleSpans, zoomsForMode } from '../src/zoom.ts';
+import { autoZooms, cameraAt, cameraFrame, cameraFromKeys, cameraKeys, cameraPoint, cameraViewportTransform, cursorAt, frameLayout, visibleSpans, zoomsForMode } from '../src/zoom.ts';
+
+const verticalLayout = frameLayout(16 / 9, 9 / 16, false);
+const paddedVerticalLayout = frameLayout(16 / 9, .514, false);
+assert.equal(verticalLayout.width, 1, 'Contain keeps the full landscape width in the initial overview');
+assert.ok(Math.abs(verticalLayout.height - 9 / 16 / (16 / 9)) < 1e-9, 'Contain base height is derived from source and canvas aspect ratios');
 
 const events = [
   { t: 0, x: .1, y: .1, down: false },
@@ -79,10 +84,7 @@ assert.equal(desktopFocus.top + .3 * desktopFocus.height, 540, 'Desktop camera u
 const gentleZoom = [{ id: 'gentle', start: .4, end: 1.6, x: .7, y: .4, scale: 1.15, enabled: true }];
 const steadyKeys = cameraKeys(gentleZoom, 2, true);
 const shakenKeys = cameraKeys(gentleZoom, 2, true, [], false, 1, 1, false, true);
-const shakeAmount = Math.max(...shakenKeys.map((key, i) => Math.hypot(key.x - steadyKeys[i]!.x, key.y - steadyKeys[i]!.y)));
-assert.ok(shakeAmount > 0 && shakeAmount <= .0013, 'Zoom shake stays visible but below 0.13% of the source frame');
-assert.deepEqual(shakenKeys, cameraKeys(gentleZoom, 2, true, [], false, 1, 1, false, true), 'Shake is deterministic for preview, seeking and export');
-assert.equal(shakenKeys[0]!.x, steadyKeys[0]!.x, 'Shake does not move the camera before a zoom');
+assert.deepEqual(shakenKeys, steadyKeys, 'Legacy vertical shake is disabled; cinematic impacts are a separate post-process');
 const portraitKeys = cameraKeys([{ id: 'portrait', start: .2, end: 1.8, x: .99, y: .02, scale: 2, enabled: true }], 2, true, [], true, portraitSpan, 1);
 for (const key of portraitKeys) {
   assert.ok(key.x >= portraitSpan / (2 * key.scale) - 1e-8 && key.x <= 1 - portraitSpan / (2 * key.scale) + 1e-8, 'Mobile camera focus must stay inside the visible 9:16 crop');
@@ -99,12 +101,18 @@ const analyzedZooms = [
 ];
 const analyzedMobile = cameraKeys(analyzedZooms, 19.635, true, [], false, 1, 1, false, false, 16 / 9, .514);
 const analyzedDesktop = cameraKeys(analyzedZooms, 19.635, true, [], false, 1, 1, false, false, 16 / 9, 16 / 9);
-assert.ok(cameraFromKeys(12.906, analyzedMobile).scale > 2.3, 'Mobile zoom must compensate for horizontal footage letterboxed in a 9:16 canvas');
+assert.ok(cameraFromKeys(12.906, analyzedMobile).scale >= 1 / paddedVerticalLayout.height - .02, 'Mobile zoom reaches the exact cover scale needed to use the padded canvas height');
 assert.ok(cameraFromKeys(12.906, analyzedDesktop).scale <= 1.4, 'Desktop framing keeps its contextual auto zoom');
 assert.ok(Math.abs(cameraFromKeys(12.906, analyzedMobile).scale - cameraFromKeys(12.74, analyzedMobile).scale) < .12, 'A short gap between different scenes must pan continuously without returning to overview');
 assert.ok(cameraFromKeys(17, analyzedMobile).scale > 2.2, 'A short pause before the next interaction should retain the current readable scene');
+const heldVertical = cameraKeys([
+  { id: 'auto-first', start: .2, end: 1.8, x: .72, y: .34, scale: 1.65, enabled: true },
+  { id: 'auto-later', start: 5.2, end: 6.8, x: .31, y: .72, scale: 1.65, enabled: true },
+], 7, true, [], false, 1, 1, false, false, 16 / 9, 9 / 16);
+assert.ok(cameraFromKeys(3.5, heldVertical).scale > 2.7, 'Vertical automatic framing must hold a readable camera through long gaps instead of returning to a small contain view');
+assert.ok(Math.hypot(cameraFromKeys(3.5, heldVertical).x - cameraFromKeys(2, heldVertical).x, cameraFromKeys(3.5, heldVertical).y - cameraFromKeys(2, heldVertical).y) < .04, 'Vertical framing remains stable between nearby interactions');
 const mobileHeadroom = cameraKeys([{ id: 'auto-top', start: .2, end: 2.2, x: .4, y: .03, scale: 1.65, enabled: true }], 2.5, true, [], false, 1, 1, false, false, 16 / 9, 9 / 16);
-assert.ok(cameraFromKeys(1.2, mobileHeadroom).scale > 2.85 && cameraFromKeys(1.2, mobileHeadroom).scale < 3, 'Mobile auto framing grows moderately to fill more height while retaining a top margin');
+assert.ok(cameraFromKeys(1.2, mobileHeadroom).scale > 3 && cameraFromKeys(1.2, mobileHeadroom).y === .5, 'Mobile focus approaches geometry-derived cover scale and clamps an edge ROI to avoid blank bands');
 for (let t = 12.7; t < 14; t += 1 / 60) {
   const before = cameraFromKeys(t, analyzedMobile), after = cameraFromKeys(t + 1 / 60, analyzedMobile);
   assert.ok(Math.abs(after.scale - before.scale) < .035 && Math.hypot(after.x - before.x, after.y - before.y) < .035, 'Scene handoffs must stay smooth at video frame cadence');

@@ -10,7 +10,7 @@ func emit(_ value: [String: Any]) {
     if let data = try? JSONSerialization.data(withJSONObject: value), let text = String(data: data, encoding: .utf8) { print(text); fflush(stdout) }
 }
 struct Pointer: Codable { var t: Double; var x: Double; var y: Double; var down: Bool; var kind: String? = nil; var rightDown: Bool? = nil; var middleDown: Bool? = nil; var typing: Bool? = nil }
-struct Media: Codable { var path: String; var duration: Double; var width: Int; var height: Int; var cursor: [Pointer]; var cursorCaptured: Bool }
+struct Media: Codable { var path: String; var duration: Double; var width: Int; var height: Int; var cursor: [Pointer]; var cursorCaptured: Bool; var hasAudio: Bool = false }
 func metadata(_ path: String) async throws -> Media {
     let asset = AVURLAsset(url: URL(fileURLWithPath: path))
     guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw Failure(message: "O arquivo não contém vídeo.") }
@@ -20,6 +20,7 @@ func metadata(_ path: String) async throws -> Media {
     let rect = CGRect(origin: .zero, size: size).applying(transform)
     guard duration.isFinite, duration > 0 else { throw Failure(message: "Duração de vídeo inválida.") }
     var media = Media(path: path, duration: duration, width: Int(abs(rect.width)), height: Int(abs(rect.height)), cursor: [], cursorCaptured: false)
+    media.hasAudio = !(try await asset.loadTracks(withMediaType: .audio)).isEmpty
     let sidecar = URL(fileURLWithPath: path).deletingPathExtension().appendingPathExtension("cursor.json")
     if let attributes = try? FileManager.default.attributesOfItem(atPath: sidecar.path), let bytes = attributes[.size] as? NSNumber, bytes.intValue <= 50_000_000, let data = try? Data(contentsOf: sidecar), let events = try? JSONDecoder().decode([Pointer].self, from: data), events.allSatisfy({ $0.t.isFinite && $0.x.isFinite && $0.y.isFinite && $0.t >= 0 && (0...1).contains($0.x) && (0...1).contains($0.y) }), zip(events, events.dropFirst()).allSatisfy({ $0.t <= $1.t }) {
         media.cursor = events; media.cursorCaptured = true
@@ -78,14 +79,89 @@ final class CameraPreview: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     }
 }
 
+func relativeAudioSample(_ sample: CMSampleBuffer, origin: CMTime) throws -> CMSampleBuffer? {
+    let pts = CMTimeSubtract(CMSampleBufferGetPresentationTimeStamp(sample), origin)
+    guard pts >= .zero else { return nil }
+    var timing = CMSampleTimingInfo()
+    guard CMSampleBufferGetSampleTimingInfo(sample, at: 0, timingInfoOut: &timing) == noErr else { throw Failure(message: "Timestamp de áudio inválido.") }
+    timing.presentationTimeStamp = pts
+    if timing.decodeTimeStamp.isValid { timing.decodeTimeStamp = CMTimeSubtract(timing.decodeTimeStamp, origin) }
+    var result: CMSampleBuffer?
+    guard CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: sample, sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleBufferOut: &result) == noErr, let result = result else { throw Failure(message: "Não foi possível sincronizar o áudio.") }
+    return result
+}
+final class MicrophoneRecording {
+    let path: String
+    var writer: AVAssetWriter?
+    var input: AVAssetWriterInput?
+    var samples = 0
+    var pending: [CMSampleBuffer] = []
+    init(path: String) { self.path = path }
+    func append(_ sample: CMSampleBuffer, origin: CMTime) throws {
+        guard let sample = try relativeAudioSample(sample, origin: origin) else { return }
+        if writer == nil {
+            guard let format = CMSampleBufferGetFormatDescription(sample), let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format) else { throw Failure(message: "Formato do microfone inválido.") }
+            let writer = try AVAssetWriter(outputURL: URL(fileURLWithPath: path), fileType: .m4a)
+            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: asbd.pointee.mSampleRate, AVNumberOfChannelsKey: min(2, max(1, Int(asbd.pointee.mChannelsPerFrame))), AVEncoderBitRateKey: 128000])
+            input.expectsMediaDataInRealTime = true
+            guard writer.canAdd(input) else { throw Failure(message: "Encoder do microfone indisponível.") }
+            writer.add(input)
+            guard writer.startWriting() else { throw writer.error ?? Failure(message: "Não foi possível iniciar o áudio do microfone.") }
+            writer.startSession(atSourceTime: .zero); self.writer = writer; self.input = input
+            // Audio-only M4A normalizes away an empty leading edit. Encode real silence to preserve the screen clock.
+            let delay = CMSampleBufferGetPresentationTimeStamp(sample).seconds
+            guard delay.isFinite && delay <= 30 else { throw Failure(message: "O microfone iniciou fora do relógio da captura.") }
+            let count = Int((delay * asbd.pointee.mSampleRate).rounded())
+            if count > 0 {
+                let audioFormat = AVAudioFormat(cmAudioFormatDescription: format)
+                guard let pcm = AVAudioPCMBuffer(pcmFormat: audioFormat, frameCapacity: AVAudioFrameCount(count)) else { throw Failure(message: "Não foi possível sincronizar o início do microfone.") }
+                pcm.frameLength = AVAudioFrameCount(count)
+                for buffer in UnsafeMutableAudioBufferListPointer(pcm.mutableAudioBufferList) { if let data = buffer.mData { memset(data, 0, Int(buffer.mDataByteSize)) } }
+                var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: CMTimeScale(asbd.pointee.mSampleRate)), presentationTimeStamp: .zero, decodeTimeStamp: .invalid)
+                var silence: CMSampleBuffer?
+                guard CMSampleBufferCreate(allocator: nil, dataBuffer: nil, dataReady: false, makeDataReadyCallback: nil, refcon: nil, formatDescription: format, sampleCount: count, sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleSizeEntryCount: 0, sampleSizeArray: nil, sampleBufferOut: &silence) == noErr, let silence = silence,
+                    CMSampleBufferSetDataBufferFromAudioBufferList(silence, blockBufferAllocator: nil, blockBufferMemoryAllocator: nil, flags: 0, bufferList: pcm.audioBufferList) == noErr else { throw Failure(message: "Não foi possível criar o silêncio inicial do microfone.") }
+                CMSampleBufferSetDataReady(silence); pending.append(silence)
+            }
+        }
+        guard pending.count < 128 else { throw Failure(message: "O encoder do microfone não acompanha a captura.") }
+        pending.append(sample); try drain()
+    }
+    func drain() throws {
+        guard let writer = writer, let input = input else { return }
+        guard writer.status == .writing else { throw writer.error ?? Failure(message: "O encoder do microfone parou.") }
+        while !pending.isEmpty && input.isReadyForMoreMediaData {
+            guard input.append(pending.removeFirst()) else { throw writer.error ?? Failure(message: "Falha ao gravar o microfone.") }
+            samples += 1
+        }
+    }
+    func finish(at duration: CMTime) async throws {
+        guard let writer = writer, let input = input else { throw Failure(message: "Nenhum áudio recebido do microfone.") }
+        let deadline = Date().addingTimeInterval(10)
+        while !pending.isEmpty {
+            try drain()
+            if !pending.isEmpty { guard Date() < deadline else { throw Failure(message: "O encoder do microfone não finalizou o áudio.") }; try await Task.sleep(nanoseconds: 1_000_000) }
+        }
+        guard samples > 0 else { throw Failure(message: "Nenhum áudio recebido do microfone.") }
+        writer.endSession(atSourceTime: duration); input.markAsFinished()
+        await writer.finishWriting()
+        guard writer.status == .completed else { throw writer.error ?? Failure(message: "Falha ao finalizar o áudio do microfone.") }
+    }
+}
+
 // shortcut: polling at 120 Hz may miss brief clicks; replace with a mouse-only event tap when integrating its permissions.
-final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoDataOutputSampleBufferDelegate {
+final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
     let queue = DispatchQueue(label: "frame.capture")
     let writer: AVAssetWriter
     let input: AVAssetWriterInput
     let path: String
     let bounds: CGRect
     let fps: Int
+    var systemAudioInput: AVAssetWriterInput?
+    var microphoneSession: AVCaptureSession?
+    let microphoneSessionQueue = DispatchQueue(label: "frame.microphone.session")
+    var microphoneRecording: MicrophoneRecording?
+    var microphoneFailure: Error?
     let cameraQueue = DispatchQueue(label: "frame.camera.frames")
     let cameraSessionQueue = DispatchQueue(label: "frame.camera.session")
     var cameraSession: AVCaptureSession?
@@ -107,7 +183,7 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoD
     var cursorTimer: DispatchSourceTimer?
     var keyMonitor: Any?
     var failure: Error?
-    init(path: String, bounds: CGRect, width: Int, height: Int, fps: Int = 60, cameraPath: String? = nil) throws {
+    init(path: String, bounds: CGRect, width: Int, height: Int, fps: Int = 60, cameraPath: String? = nil, systemAudio: Bool = false, microphone: Bool = false) throws {
         self.path = path; self.bounds = bounds; self.fps = fps
         writer = try AVAssetWriter(outputURL: URL(fileURLWithPath: path), fileType: .mov)
         input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: width, AVVideoHeightKey: height, AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: videoBitrate(width: width, height: height, fps: fps), AVVideoExpectedSourceFrameRateKey: fps, AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel, AVVideoAllowFrameReorderingKey: false]])
@@ -115,6 +191,21 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoD
         super.init()
         guard writer.canAdd(input) else { throw Failure(message: "Encoder H.264 indisponível.") }
         writer.add(input)
+        if systemAudio {
+            let audio = AVAssetWriterInput(mediaType: .audio, outputSettings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48000, AVNumberOfChannelsKey: 2, AVEncoderBitRateKey: 192000])
+            audio.expectsMediaDataInRealTime = true
+            guard writer.canAdd(audio) else { throw Failure(message: "Encoder de áudio do sistema indisponível.") }
+            writer.add(audio); systemAudioInput = audio
+        }
+        if microphone {
+            guard let device = AVCaptureDevice.default(for: .audio) else { throw Failure(message: "Nenhum microfone disponível.") }
+            let session = AVCaptureSession(), input = try AVCaptureDeviceInput(device: device), output = AVCaptureAudioDataOutput()
+            session.beginConfiguration(); output.setSampleBufferDelegate(self, queue: queue)
+            guard session.canAddInput(input), session.canAddOutput(output) else { throw Failure(message: "O microfone não pode iniciar neste Mac.") }
+            session.addInput(input); session.addOutput(output); session.commitConfiguration()
+            microphoneSession = session
+            microphoneRecording = MicrophoneRecording(path: URL(fileURLWithPath: path).deletingPathExtension().appendingPathExtension("microphone.m4a").path)
+        }
         if let cameraPath = cameraPath {
             guard let device = AVCaptureDevice.default(for: .video) else { throw Failure(message: "Nenhuma webcam disponível.") }
             let session = AVCaptureSession(); session.beginConfiguration(); if session.canSetSessionPreset(.hd1280x720) { session.sessionPreset = .hd1280x720 }
@@ -126,8 +217,16 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoD
             self.cameraSession = session; self.cameraPath = cameraPath
         }
     }
+    func appendSystemAudio(_ sample: CMSampleBuffer) {
+        guard sample.isValid, let start = start, CMSampleBufferGetPresentationTimeStamp(sample) >= start, let audio = systemAudioInput, audio.isReadyForMoreMediaData else { return }
+        if !audio.append(sample) { failure = writer.error ?? Failure(message: "Falha ao gravar o áudio do sistema.") }
+    }
     func stream(_ stream: SCStream, didStopWithError error: Error) { queue.async { self.failure = error }; emit(["event": "capture-error", "message": error.localizedDescription]) }
     func stream(_ stream: SCStream, didOutputSampleBuffer sample: CMSampleBuffer, of type: SCStreamOutputType) {
+        if type == .audio {
+            appendSystemAudio(sample)
+            return
+        }
         guard type == .screen, sample.isValid, CMSampleBufferGetImageBuffer(sample) != nil else { return }
         if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]], let raw = attachments.first?[.status] as? Int, raw != SCFrameStatus.complete.rawValue { return }
         let pts = CMSampleBufferGetPresentationTimeStamp(sample)
@@ -135,6 +234,7 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoD
             guard writer.startWriting() else { failure = writer.error; return }
             writer.startSession(atSourceTime: pts); start = pts
             if let session = cameraSession { cameraSessionQueue.async { session.startRunning() } }
+            if let session = microphoneSession { microphoneSessionQueue.async { session.startRunning() } }
             emit(["event": "started"])
         }
         if input.isReadyForMoreMediaData {
@@ -143,6 +243,12 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoD
         }
     }
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        if output is AVCaptureAudioDataOutput {
+            guard let start = start, sampleBuffer.isValid else { return }
+            do { try microphoneRecording?.append(sampleBuffer, origin: start) }
+            catch { microphoneFailure = error; emit(["event": "capture-error", "message": error.localizedDescription]) }
+            return
+        }
         guard let screenStart = start, let image = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let now = Date()
         if now.timeIntervalSince(lastCameraPreviewTime) >= 0.15 {
@@ -221,6 +327,7 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoD
         if let keyMonitor = keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
         try await stream?.stopCapture()
         if let session = cameraSession { cameraSessionQueue.sync { session.stopRunning() }; cameraQueue.sync {} }
+        if let session = microphoneSession { microphoneSessionQueue.sync { session.stopRunning() }; queue.sync {} }
         if let cameraFailure = cameraQueue.sync(execute: { self.cameraFailure }) { writer.cancelWriting(); cameraWriter?.cancelWriting(); throw cameraFailure }
         queue.sync {
             timer?.cancel(); timer = nil
@@ -235,12 +342,17 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoD
                 }
             }
             if start != nil { writer.endSession(atSourceTime: stop); reportTime(stop, force: true) }
-            input.markAsFinished()
+            input.markAsFinished(); systemAudioInput?.markAsFinished()
         }
         if let failure = queue.sync(execute: { self.failure }) { writer.cancelWriting(); throw failure }
         guard queue.sync(execute: { start != nil }) else { throw Failure(message: "Nenhum frame recebido. Confira a permissão de gravação de tela.") }
         await writer.finishWriting()
         guard writer.status == .completed else { throw writer.error ?? Failure(message: "Não foi possível finalizar o vídeo.") }
+        if let error = microphoneFailure { throw error }
+        if let microphone = microphoneRecording, let start = start {
+            let duration = CMTime(seconds: max(0, lastReportedTime), preferredTimescale: start.timescale)
+            try await microphone.finish(at: duration)
+        }
         cameraInput?.markAsFinished()
         if cameraSession != nil && cameraWriter == nil { throw Failure(message: "Nenhum frame recebido da webcam.") }
         if let cameraWriter = cameraWriter { await cameraWriter.finishWriting(); guard cameraWriter.status == .completed else { throw cameraWriter.error ?? Failure(message: "Não foi possível finalizar a gravação da webcam.") } }
@@ -250,14 +362,23 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoD
 }
 
 struct Key: Codable { let t: Double; let x: Double; let y: Double; let scale: Double; var cut: Bool? = nil }
-struct Look: Codable { let background: Int; let padding: Double; let radius: Double; let shadow: Double; let cursorSize: Double; let smooth: Bool; let aspect: String; let cropFill: Bool?; let cropFollowCursor: Bool?; let cameraMode: String?; let colors: [String]?; let backgroundMode: String?; let cursorSmooth: Bool?; let wallpaper: String?; let cursorAsset: String?; let cursorTheme: String?; let backgroundBlur: Double?; let motionBlur: MotionBlur?; let clickSounds: Bool?; let clickSoundVolume: Double? }
+struct Look: Codable { let background: Int; let padding: Double; let radius: Double; let shadow: Double; let cursorSize: Double; let smooth: Bool; let aspect: String; let cropFill: Bool?; let cropFollowCursor: Bool?; let cameraMode: String?; let colors: [String]?; let backgroundMode: String?; let cursorSmooth: Bool?; let wallpaper: String?; let cursorAsset: String?; let cursorTheme: String?; let backgroundBlur: Double?; let motionBlur: MotionBlur?; let clickSounds: Bool?; let clickSoundVolume: Double?; var cameraMotion: CameraMotion? = nil }
+struct CameraMotion: Codable { let intensity: Double; let duration: Double; let frequency: Double; let webcamShake: Bool?; let impacts: [Double]? }
+func webcamMotionState(_ state: WebcamKeyframe, _ time: Double, _ motion: CameraMotion?) -> WebcamKeyframe {
+    guard let motion = motion, motion.webcamShake == true, let event = motion.impacts?.last(where: { $0 <= time }) else { return state }
+    let age = time - event, u = age / motion.duration
+    guard u > 0 && u < 1 else { return state }
+    let envelope = min(1, 2 * pow(sin(Double.pi * u), 2) * (1 - u)), phase = 2 * Double.pi * motion.frequency * age
+    let x = state.x + motion.intensity * envelope * sin(phase), y = state.y + motion.intensity * 0.65 * envelope * sin(phase * 0.85 + 0.7)
+    return WebcamKeyframe(t: state.t, x: max(0, min(1,x)), y: max(0,min(1,y)), size: state.size, opacity: state.opacity, borderRadius: state.borderRadius, easing: state.easing)
+}
 struct MotionBlur: Codable { let cursor: Double; let zoom: Double; let pan: Double }
 struct Effect: Codable { let id: String; let kind: String; let start: Double; let end: Double; let x: Double; let y: Double; let width: Double; let height: Double; let opacity: Double }
 struct BackgroundAudio: Codable { let path: String; let volume: Double }
 struct WebcamKeyframe: Codable { let t: Double; let x: Double; let y: Double; let size: Double; let opacity: Double?; let borderRadius: Double?; let easing: String? }
-struct Webcam: Codable { let path: String; let x: Double; let y: Double; let size: Double; let shape: String; let keyframes: [WebcamKeyframe]?; let mode: String?; let opacity: Double?; let border: Double?; let shadow: Double?; let borderRadius: Double? }
+struct Webcam: Codable { let path: String; let x: Double; let y: Double; let size: Double; let shape: String; let keyframes: [WebcamKeyframe]?; let mode: String?; let opacity: Double?; let border: Double?; let shadow: Double?; let borderRadius: Double?; var zoomBehavior: String? = nil; var zoomSize: Double? = nil; var transitionDuration: Double? = nil }
 struct ClipRange: Codable { let start: Double; let end: Double; var speed: Double? = nil; var hideCursor: Bool? = nil; var cursorOriginal: Bool? = nil; var rate: Double { speed ?? 1 }; var duration: Double { (end - start) / rate } }
-struct ExportJob: Codable { let source: String; let destination: String; let start: Double; let end: Double; let appearance: Look; let keys: [Key]; let cursor: [Pointer]; let cursorCaptured: Bool; let assetsRoot: String?; let resolution: Int?; let fps: Int?; let ranges: [ClipRange]?; let rawCursor: [Pointer]?; let effects: [Effect]?; let backgroundAudio: BackgroundAudio?; let webcam: Webcam? }
+struct ExportJob: Codable { let source: String; let destination: String; let start: Double; let end: Double; let appearance: Look; let keys: [Key]; let cursor: [Pointer]; let cursorCaptured: Bool; let assetsRoot: String?; let resolution: Int?; let fps: Int?; let ranges: [ClipRange]?; let rawCursor: [Pointer]?; let effects: [Effect]?; let backgroundAudio: BackgroundAudio?; let webcam: Webcam?; var microphone: BackgroundAudio? = nil; var sourceVolume: Double? = nil }
 final class Cancellation: @unchecked Sendable { let lock = NSLock(); var value = false; func cancel() { lock.lock(); value = true; lock.unlock() }; var cancelled: Bool { lock.lock(); defer { lock.unlock() }; return value } }
 func mix(_ a: Double, _ b: Double, _ u: Double) -> Double { a + (b - a) * u }
 func camera(_ time: Double, _ keys: [Key]) -> Key {
@@ -269,30 +390,59 @@ func camera(_ time: Double, _ keys: [Key]) -> Key {
     return Key(t: time, x: mix(a.x, b.x, u), y: mix(a.y, b.y, u), scale: mix(a.scale, b.scale, u))
 }
 func webcamState(_ webcam: Webcam, _ time: Double) -> WebcamKeyframe {
-    let opacity = webcam.opacity ?? 1, radius = webcam.borderRadius ?? (webcam.shape == "circle" ? 0.5 : webcam.shape == "rounded" ? 0.18 : 0)
+    let opacity = webcam.opacity ?? 1, radius = webcam.borderRadius ?? (webcam.shape == "circle" ? 0.5 : webcam.shape == "square" ? 0 : 0.18)
     if webcam.mode == "static" { return WebcamKeyframe(t: time, x: webcam.x, y: webcam.y, size: webcam.size, opacity: opacity, borderRadius: radius, easing: "linear") }
     let keys = webcam.keyframes ?? []
     guard !keys.isEmpty else { return WebcamKeyframe(t: time, x: webcam.x, y: webcam.y, size: webcam.size, opacity: opacity, borderRadius: radius, easing: "linear") }
-    guard let next = keys.firstIndex(where: { $0.t >= time }) else { return keys[keys.count - 1] }
-    if next == 0 { return keys[0] }
-    let a = keys[next - 1], b = keys[next], raw = b.t > a.t ? max(0, min(1, (time - a.t) / (b.t - a.t))) : 0
+    let next = keys.firstIndex(where: { $0.t >= time }) ?? keys.count
+    let a = keys[max(0, next - 1)], b = keys[min(next, keys.count - 1)], raw = next == 0 ? 0 : next >= keys.count ? 1 : b.t > a.t ? max(0, min(1, (time - a.t) / (b.t - a.t))) : 0
     let amount = webcamEase(raw, a.easing ?? "ease-in-out")
     return WebcamKeyframe(t: time, x: mix(a.x, b.x, amount), y: mix(a.y, b.y, amount), size: mix(a.size, b.size, amount), opacity: mix(a.opacity ?? opacity, b.opacity ?? opacity, amount), borderRadius: mix(a.borderRadius ?? radius, b.borderRadius ?? radius, amount), easing: a.easing)
 }
 func webcamEase(_ value: Double, _ easing: String) -> Double {
     let t = max(0, min(1, value))
+    if easing == "cubic-bezier" && t > 0 && t < 1 {
+        var low = 0.0, high = 1.0
+        for _ in 0..<24 {
+            let u = (low + high) / 2, x = 3 * pow(1 - u, 2) * u * 0.42 + 3 * (1 - u) * u * u * 0.58 + pow(u, 3)
+            if x < t { low = u } else { high = u }
+        }
+        let u = (low + high) / 2
+        return 3 * (1 - u) * u * u + pow(u, 3)
+    }
     switch easing { case "linear": return t; case "ease-out": return 1 - pow(1 - t, 3); default: return t * t * (3 - 2 * t) }
 }
-func plannedWebcamState(_ state: WebcamKeyframe, _ mode: String?, _ cameraScale: Double, _ aspect: String, _ sizeFactor: Double) -> WebcamKeyframe {
+func webcamFrameRect(_ state: WebcamKeyframe, _ shape: String, _ sourceAspect: Double, _ width: Double, _ height: Double) -> CGRect {
+    let shortEdge = min(width, height), side = shortEdge * state.size
+    let aspect = shape == "rectangle" ? max(0.25, min(4, sourceAspect)) : 1
+    let frameWidth = side * min(1, aspect), frameHeight = side / max(1, aspect), margin = shortEdge * 0.025
+    let cx = max(margin + frameWidth / 2, min(width - margin - frameWidth / 2, state.x * width))
+    let cy = max(margin + frameHeight / 2, min(height - margin - frameHeight / 2, state.y * height))
+    return CGRect(x: cx - frameWidth / 2, y: height - cy - frameHeight / 2, width: frameWidth, height: frameHeight)
+}
+func webcamFocusScale(_ time: Double, _ keys: [Key], _ duration: Double = 0.4) -> Double {
+    var sum = 0.0
+    for i in 0...24 { sum += max(1.02, min(1.35, camera(time - duration * Double(i) / 24, keys).scale)) }
+    return sum / 25
+}
+func webcamZoomSize(_ size: Double, _ cameraScale: Double, _ behavior: String? = nil, _ customSize: Double? = nil) -> Double {
+    let amount = webcamEase((cameraScale - 1.02) / 0.33, "ease-in-out")
+    let target = behavior == "shrink" ? size * 0.65 : behavior == "grow" ? size * 1.35 : behavior == "custom" ? customSize ?? size : size
+    return max(0.08, min(0.6, mix(size, target, amount)))
+}
+func plannedWebcamState(_ input: WebcamKeyframe, _ mode: String?, _ cameraScale: Double, _ aspect: String, _ behavior: String? = nil, _ customSize: Double? = nil, _ hasManualKeys: Bool = false) -> WebcamKeyframe {
+    if mode != "static" && hasManualKeys { return input }
+    let state = WebcamKeyframe(t: input.t, x: input.x, y: input.y, size: webcamZoomSize(input.size, cameraScale, behavior, customSize), opacity: input.opacity, borderRadius: input.borderRadius, easing: input.easing)
     guard mode == "auto" || mode == "hybrid" else { return state }
-    let side = state.size * sizeFactor
-    let overlappingFocus = abs(state.x - 0.5) < side / 2 + 0.025 && abs(state.y - 0.5) < side / 2 + 0.025
-    let margin = max(state.size / 2, side / 2 + 0.025)
+    let webcamFrame = state
+    let side = webcamFrame.size
+    let overlappingFocus = abs(webcamFrame.x - 0.5) < side / 2 + 0.025 && abs(webcamFrame.y - 0.5) < side / 2 + 0.025
+    let margin = max(webcamFrame.size / 2, side / 2 + 0.025)
     let candidates = [(1 - margin, 1 - margin), (margin, 1 - margin), (1 - margin, margin), (margin, margin)]
-    let target = overlappingFocus ? candidates.max { hypot($0.0 - 0.5, $0.1 - 0.5) < hypot($1.0 - 0.5, $1.1 - 0.5) }! : (state.x, state.y)
+    let target = overlappingFocus ? candidates.max { hypot($0.0 - 0.5, $0.1 - 0.5) < hypot($1.0 - 0.5, $1.1 - 0.5) }! : (webcamFrame.x, webcamFrame.y)
     let raw = mode == "auto" ? max(0, min(1, (cameraScale - 1.05) / 0.45)) : overlappingFocus ? max(0, min(1, (cameraScale - 1.08) / 0.42)) : 0
     let amount = webcamEase(raw, "ease-in-out")
-    return WebcamKeyframe(t: state.t, x: mix(state.x, target.0, amount), y: mix(state.y, target.1, amount), size: mode == "auto" ? state.size * (1 - amount * 0.16) : state.size, opacity: state.opacity, borderRadius: state.borderRadius, easing: state.easing)
+    return WebcamKeyframe(t: webcamFrame.t, x: mix(webcamFrame.x, target.0, amount), y: mix(webcamFrame.y, target.1, amount), size: webcamFrame.size, opacity: webcamFrame.opacity, borderRadius: webcamFrame.borderRadius, easing: webcamFrame.easing)
 }
 func pointer(_ time: Double, _ events: [Pointer]) -> Pointer? {
     guard !events.isEmpty else { return nil }
@@ -308,15 +458,22 @@ func motionFrames(_ t: Double, keys: [Key], events: [Pointer], range: ClipRange,
     var low = 0, high = cuts.count
     while low < high { let m = (low + high) / 2; if cuts[m] <= t { low = m + 1 } else { high = m } }
     let start = max(range.start, low > 0 ? cuts[low - 1] : 0), past = max(start, t - range.rate / 60)
-    let samples: [(Key, Pointer?)] = (0..<5).map { index in
-        let time = max(start, t - (t - past) * Double(index) / 4)
+    let count = max(blur.cursor, max(blur.zoom, blur.pan)) > 0.5 ? 5 : 3
+    let samples: [(Key, Pointer?)] = (0..<count).map { index in
+        let time = max(start, t - (t - past) * Double(index) / Double(count - 1))
         let previous = camera(time, keys), scale = mix(current.scale, previous.scale, blur.zoom), halfX = spanX / (2 * scale), halfY = spanY / (2 * scale)
         let cam = Key(t: t, x: max(halfX, min(1 - halfX, mix(current.x, previous.x, blur.pan))), y: max(halfY, min(1 - halfY, mix(current.y, previous.y, blur.pan))), scale: scale)
         var cursor: Pointer?
         if let point = point, let other = pointer(time, events) { cursor = Pointer(t: point.t, x: mix(point.x, other.x, blur.cursor), y: mix(point.y, other.y, blur.cursor), down: point.down, kind: point.kind) }
         return (cam, cursor)
     }
-    return samples.allSatisfy { $0.0.x == current.x && $0.0.y == current.y && $0.0.scale == current.scale && $0.1?.x == point?.x && $0.1?.y == point?.y } ? [(current, point)] : samples
+    return samples.allSatisfy { abs($0.0.x - current.x) * current.scale < 0.0001 && abs($0.0.y - current.y) * current.scale < 0.0001 && abs($0.0.scale - current.scale) < 0.0001 && ($0.1 == nil || point == nil || hypot($0.1!.x - point!.x, $0.1!.y - point!.y) * current.scale < 0.0001) } ? [(current, point)] : samples
+}
+func accumulateMotionFrame(_ input: CIImage, _ previous: CIImage?, _ count: Int) -> CIImage {
+    guard count > 1 else { return input }
+    // Match Canvas2D sRGB mixing; weight alpha once before adding premultiplied samples.
+    let weighted = input.applyingFilter("CILinearToSRGBToneCurve").applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1 / Double(count))])
+    return previous.map { weighted.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: $0]) } ?? weighted
 }
 func color(_ hex: String) -> CIColor {
     let n = UInt32(hex, radix: 16)!
@@ -340,8 +497,11 @@ func exportVideo(_ job: ExportJob, cancel: Cancellation) async throws {
     let sourceDuration = try await asset.load(.duration).seconds
     guard !ranges.isEmpty, ranges.count <= 10000, ranges.allSatisfy({ $0.start.isFinite && $0.end.isFinite && $0.start >= job.start && $0.end <= min(job.end, sourceDuration) + 0.000001 && $0.end > $0.start && $0.rate.isFinite && $0.rate >= 0.25 && $0.rate <= 4 }), zip(ranges, ranges.dropFirst()).allSatisfy({ $0.end <= $1.start }) else { throw Failure(message: "Cortes inválidos.") }
     let duration = ranges.reduce(0) { $0 + $1.duration }
+    if let motion = job.appearance.cameraMotion {
+        guard motion.intensity.isFinite && (0...0.004).contains(motion.intensity) && motion.duration.isFinite && (0.08...0.18).contains(motion.duration) && motion.frequency.isFinite && (8...16).contains(motion.frequency) && (motion.impacts ?? []).allSatisfy({$0.isFinite && $0 >= 0 && $0 <= sourceDuration}) else { throw Failure(message: "Camera Motion inválido.") }
+    }
     if let blur = job.appearance.motionBlur { guard [blur.cursor, blur.zoom, blur.pan].allSatisfy({ $0.isFinite && $0 >= 0 && $0 <= 1 }) else { throw Failure(message: "Intensidade de motion blur inválida.") } }
-    if let webcam = job.webcam { guard webcam.size.isFinite && (0.08...0.6).contains(webcam.size) && webcam.x.isFinite && ((webcam.size / 2)...(1 - webcam.size / 2)).contains(webcam.x) && webcam.y.isFinite && ((webcam.size / 2)...(1 - webcam.size / 2)).contains(webcam.y) && ["circle", "rounded", "square"].contains(webcam.shape) else { throw Failure(message: "Configuração da webcam inválida.") } }
+    if let webcam = job.webcam { guard (webcam.zoomBehavior == nil || ["keep", "shrink", "grow", "custom"].contains(webcam.zoomBehavior!)) && (webcam.zoomSize == nil || (0.08...0.6).contains(webcam.zoomSize!)) && (webcam.transitionDuration == nil || (0.15...2).contains(webcam.transitionDuration!)) && webcam.size.isFinite && (0.08...0.6).contains(webcam.size) && webcam.x.isFinite && (0...1).contains(webcam.x) && webcam.y.isFinite && (0...1).contains(webcam.y) && ["circle", "rounded", "square", "rectangle"].contains(webcam.shape) else { throw Failure(message: "Configuração da webcam inválida.") } }
     guard duration >= 0.1 else { throw Failure(message: "Mantenha pelo menos 0,1 segundo de vídeo.") }
     let composition = AVMutableComposition()
     var insertionTime = CMTime.zero
@@ -351,6 +511,26 @@ func exportVideo(_ job: ExportJob, cancel: Cancellation) async throws {
         let scaled = CMTime(seconds: range.duration, preferredTimescale: 60000)
         composition.scaleTimeRange(CMTimeRange(start: insertionTime, duration: timeRange.duration), toDuration: scaled)
         insertionTime = CMTimeAdd(insertionTime, scaled)
+    }
+    let sourceAudioTracks = composition.tracks(withMediaType: .audio)
+    var microphoneTrack: AVMutableCompositionTrack?
+    if let microphone = job.microphone {
+        guard microphone.volume.isFinite && (0...1).contains(microphone.volume) else { throw Failure(message: "Volume do microfone inválido.") }
+        let asset = AVURLAsset(url: URL(fileURLWithPath: microphone.path))
+        guard let source = try await asset.loadTracks(withMediaType: .audio).first, let track = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else { throw Failure(message: "Trilha do microfone inválida.") }
+        let available = try await source.load(.timeRange)
+        var position = 0.0
+        for range in ranges {
+            let begin = max(range.start, available.start.seconds), end = min(range.end, CMTimeRangeGetEnd(available).seconds)
+            if end > begin {
+                let destination = CMTime(seconds: position + (begin - range.start) / range.rate, preferredTimescale: 60000)
+                let segment = CMTimeRange(start: CMTime(seconds: begin, preferredTimescale: 60000), duration: CMTime(seconds: end - begin, preferredTimescale: 60000))
+                try track.insertTimeRange(segment, of: source, at: destination)
+                track.scaleTimeRange(CMTimeRange(start: destination, duration: segment.duration), toDuration: CMTime(seconds: (end - begin) / range.rate, preferredTimescale: 60000))
+            }
+            position += range.duration
+        }
+        microphoneTrack = track
     }
     var musicTrack: AVMutableCompositionTrack?
     if let music = job.backgroundAudio {
@@ -419,8 +599,10 @@ func exportVideo(_ job: ExportJob, cancel: Cancellation) async throws {
     let height = max(2, Int((Double(width) / aspect / 2).rounded()) * 2)
     let w = CGFloat(width), h = CGFloat(height), canvas = CGRect(x: 0, y: 0, width: w, height: h)
     let padding = min(w, h) * job.appearance.padding / 100
-    let fit = job.appearance.cropFill == true ? max((w - 2 * padding) / sw, (h - 2 * padding) / sh) : min((w - 2 * padding) / sw, (h - 2 * padding) / sh)
-    let vw = sw * fit, vh = sh * fit
+    // Layout fit is the base composition. Camera scale is applied once, later,
+    // to this fitted frame; the canvas crop is only the final clip rectangle.
+    let layoutScale = job.appearance.cropFill == true ? max((w - 2 * padding) / sw, (h - 2 * padding) / sh) : min((w - 2 * padding) / sw, (h - 2 * padding) / sh)
+    let vw = sw * layoutScale, vh = sh * layoutScale
     let spanX = job.appearance.cropFill == true ? min(1, Double(w - 2 * padding) / Double(vw)) : 1
     let spanY = job.appearance.cropFill == true ? min(1, Double(h - 2 * padding) / Double(vh)) : 1
     let radius = job.appearance.radius * w / 1000
@@ -455,7 +637,11 @@ func exportVideo(_ job: ExportJob, cancel: Cancellation) async throws {
     var audioOutput: AVAssetReaderAudioMixOutput?
     if !audioTracks.isEmpty {
         let ao = AVAssetReaderAudioMixOutput(audioTracks: audioTracks, audioSettings: [AVFormatIDKey: kAudioFormatLinearPCM]); ao.audioTimePitchAlgorithm = .spectral
-        var parameters: [AVAudioMixInputParameters] = []
+        guard (job.sourceVolume ?? 1).isFinite && (0...1).contains(job.sourceVolume ?? 1) else { throw Failure(message: "Volume da gravação inválido.") }
+        var parameters: [AVAudioMixInputParameters] = sourceAudioTracks.map { track in let p = AVMutableAudioMixInputParameters(track: track); p.setVolume(Float(job.sourceVolume ?? 1), at: .zero); return p }
+        if let track = microphoneTrack, let microphone = job.microphone {
+            let p = AVMutableAudioMixInputParameters(track: track); p.setVolume(Float(microphone.volume), at: .zero); parameters.append(p)
+        }
         if let musicTrack = musicTrack, let music = job.backgroundAudio {
             let musicParameters = AVMutableAudioMixInputParameters(track: musicTrack); musicParameters.setVolume(Float(music.volume), at: .zero)
             parameters.append(musicParameters)
@@ -472,7 +658,8 @@ func exportVideo(_ job: ExportJob, cancel: Cancellation) async throws {
     let writer = try AVAssetWriter(outputURL: temporary, fileType: .mp4)
     defer { if FileManager.default.fileExists(atPath: temporary.path) { try? FileManager.default.removeItem(at: temporary) } }
     let bitrate = videoBitrate(width: width, height: height, fps: fps)
-    let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: width, AVVideoHeightKey: height, AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: bitrate, AVVideoExpectedSourceFrameRateKey: fps, AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel, AVVideoAllowFrameReorderingKey: false]])
+    let outputColors: [String: Any] = [AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2, AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2, AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2]
+    let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: width, AVVideoHeightKey: height, AVVideoColorPropertiesKey: outputColors, AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: bitrate, AVVideoExpectedSourceFrameRateKey: fps, AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel, AVVideoAllowFrameReorderingKey: false]])
     let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferWidthKey as String: width, kCVPixelBufferHeightKey as String: height, kCVPixelBufferIOSurfacePropertiesKey as String: [:]])
     guard writer.canAdd(input) else { throw Failure(message: "Encoder indisponível para esta resolução e taxa de quadros.") }
     writer.add(input)
@@ -547,20 +734,16 @@ func exportVideo(_ job: ExportJob, cancel: Cancellation) async throws {
                 var frame = sourceImage
                 if job.cursorCaptured, let point = point, job.appearance.cursorSize > 0 {
                     let (cursorImage, hotspotX, hotspotY) = try cursorStyle(point.kind)
-                    let cursor = cursorImage.transformed(by: CGAffineTransform(scaleX: 1 / fit, y: 1 / fit)).transformed(by: CGAffineTransform(translationX: point.x * sw - hotspotX * cursorImage.extent.width / fit, y: (1 - point.y) * sh - (1 - hotspotY) * cursorImage.extent.height / fit))
+                    let cursor = cursorImage.transformed(by: CGAffineTransform(scaleX: 1 / layoutScale, y: 1 / layoutScale)).transformed(by: CGAffineTransform(translationX: point.x * sw - hotspotX * cursorImage.extent.width / layoutScale, y: (1 - point.y) * sh - (1 - hotspotY) * cursorImage.extent.height / layoutScale))
                     frame = cursor.composited(over: frame)
                 }
-                let scale = fit * sampleCamera.scale
-                frame = frame.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+                let renderedScale = layoutScale * sampleCamera.scale
+                frame = frame.transformed(by: CGAffineTransform(scaleX: renderedScale, y: renderedScale))
                     .transformed(by: CGAffineTransform(translationX: w / 2 - sampleCamera.x * vw * sampleCamera.scale, y: h / 2 - (1 - sampleCamera.y) * vh * sampleCamera.scale))
                     .cropped(to: canvas)
-                if count > 1 {
-                    let weight = 1 / Double(count)
-                    frame = frame.applyingFilter("CIColorMatrix", parameters: ["inputRVector": CIVector(x: weight, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: weight, z: 0, w: 0), "inputBVector": CIVector(x: 0, y: 0, z: weight, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: weight)])
-                }
-                accumulated = accumulated.map { frame.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: $0]) } ?? frame
+                accumulated = accumulateMotionFrame(frame, accumulated, count)
             }
-            var frame = accumulated!
+            var frame = count > 1 ? accumulated!.applyingFilter("CISRGBToneCurveToLinear") : accumulated!
             for effect in job.effects ?? [] where t >= effect.start && t < effect.end {
                 let effectX = 0.5 + (effect.x - 0.5) * spanX
                 let effectY = 0.5 + (effect.y - 0.5) * spanY
@@ -596,36 +779,44 @@ func exportVideo(_ job: ExportJob, cancel: Cancellation) async throws {
             }
             var composed = frame.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: frameBackground, kCIInputMaskImageKey: activeMask]).cropped(to: canvas)
             if let webcam = job.webcam, let sample = heldWebcamSample, let cameraBuffer = CMSampleBufferGetImageBuffer(sample) {
-                let webcamPosition = plannedWebcamState(webcamState(webcam, sourceTime), webcam.mode, frameCam.scale, job.appearance.aspect, job.appearance.aspect == "9:16" ? 0.65 : 1.0)
+                // Match WebKit opacity/shadow compositing in sRGB, isolated to the webcam layer.
+                var cameraBackdrop = composed.applyingFilter("CILinearToSRGBToneCurve")
+                let webcamPosition = webcamMotionState(plannedWebcamState(webcamState(webcam, sourceTime), webcam.mode, webcamFocusScale(t, job.keys, webcam.transitionDuration ?? 0.4), job.appearance.aspect, webcam.zoomBehavior, webcam.zoomSize, !(webcam.keyframes ?? []).isEmpty), sourceTime, job.appearance.cameraMotion)
                 let raw = CIImage(cvPixelBuffer: cameraBuffer).transformed(by: webcamTransform)
-                let upright = raw.transformed(by: CGAffineTransform(translationX: -raw.extent.minX, y: -raw.extent.minY))
-                let portraitScale = job.appearance.aspect == "9:16" ? 0.65 : 1.0
-                let side = min(w, h) * webcamPosition.size * portraitScale
-                let centerX = webcamPosition.x * w
-                let centerY = (1 - webcamPosition.y) * h
-                let cameraRect = CGRect(x: centerX - side / 2, y: centerY - side / 2, width: side, height: side)
+                let upright = raw.transformed(by: CGAffineTransform(translationX: -raw.extent.minX, y: -raw.extent.minY)).applyingFilter("CILinearToSRGBToneCurve")
+                let cameraRect = webcamFrameRect(webcamPosition, webcam.shape, Double(upright.extent.width / upright.extent.height), Double(w), Double(h))
+                let side = max(cameraRect.width, cameraRect.height), shortSide = min(cameraRect.width, cameraRect.height)
                 if !cameraRect.intersection(canvas).isNull && !cameraRect.intersection(canvas).isEmpty {
                     let opacity = max(0, min(1, webcamPosition.opacity ?? webcam.opacity ?? 1))
-                    let border = max(0, min(side * 0.08, (webcam.border ?? 2) * w / 1000))
-                    let radius = webcam.shape == "circle" ? side / 2 : side * max(0, min(0.5, webcamPosition.borderRadius ?? webcam.borderRadius ?? (webcam.shape == "rounded" ? 0.18 : 0)))
-                    let outerMask = CIFilter(name: "CIRoundedRectangleGenerator", parameters: ["inputExtent": CIVector(cgRect: cameraRect), "inputRadius": radius, "inputColor": CIColor(red: 1, green: 1, blue: 1, alpha: opacity)])!.outputImage!.cropped(to: canvas)
-                    let shadowStrength = max(0, min(1, (webcam.shadow ?? 35) / 100))
+                    let border = max(0, min(shortSide * 0.08, (webcam.border ?? 2) * w / 1000))
+                    let radius = webcam.shape == "circle" ? shortSide / 2 : shortSide * max(0, min(0.5, webcamPosition.borderRadius ?? webcam.borderRadius ?? (webcam.shape == "square" ? 0 : 0.18)))
+                    let clear = CIImage(color: CIColor.clear).cropped(to: canvas)
+                    let outerMask = CIFilter(name: "CIRoundedRectangleGenerator", parameters: ["inputExtent": CIVector(cgRect: cameraRect), "inputRadius": radius, "inputColor": CIColor.white])!.outputImage!.cropped(to: canvas)
+                    let shadowStrength = max(0, min(1, (webcam.shadow ?? 35) / 100)) * opacity
                     if shadowStrength > 0 {
                         let shadow = outerMask.transformed(by: CGAffineTransform(translationX: 0, y: -side * 0.025)).applyingGaussianBlur(sigma: side * 0.055).cropped(to: canvas)
+                            .applyingFilter("CISourceOutCompositing", parameters: [kCIInputBackgroundImageKey: outerMask])
                         let shadowColor = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: shadowStrength)).cropped(to: canvas)
-                        composed = shadowColor.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: composed, kCIInputMaskImageKey: shadow]).cropped(to: canvas)
+                        cameraBackdrop = shadowColor.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: cameraBackdrop, kCIInputMaskImageKey: shadow]).cropped(to: canvas)
                     }
-                    let borderColor = CIImage(color: CIColor.white).cropped(to: cameraRect).applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: composed, kCIInputMaskImageKey: outerMask])
-                    let inset = border
-                    let innerRect = cameraRect.insetBy(dx: inset, dy: inset)
-                    let innerRadius = max(0, radius - inset)
-                    let innerMask = CIFilter(name: "CIRoundedRectangleGenerator", parameters: ["inputExtent": CIVector(cgRect: innerRect), "inputRadius": innerRadius, "inputColor": CIColor(red: 1, green: 1, blue: 1, alpha: opacity)])!.outputImage!.cropped(to: canvas)
+                    let borderLayer = CIImage(color: CIColor.white).cropped(to: cameraRect).applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: clear, kCIInputMaskImageKey: outerMask])
+                    let innerRect = cameraRect.insetBy(dx: border, dy: border)
+                    let innerMask = CIFilter(name: "CIRoundedRectangleGenerator", parameters: ["inputExtent": CIVector(cgRect: innerRect), "inputRadius": max(0, radius - border), "inputColor": CIColor.white])!.outputImage!.cropped(to: canvas)
                     let cover = max(innerRect.width / upright.extent.width, innerRect.height / upright.extent.height), scaled = upright.transformed(by: CGAffineTransform(scaleX: cover, y: cover))
-                    let cameraImage = scaled.transformed(by: CGAffineTransform(translationX: centerX - scaled.extent.midX, y: centerY - scaled.extent.midY)).cropped(to: innerRect.intersection(canvas))
-                    composed = cameraImage.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: borderColor, kCIInputMaskImageKey: innerMask]).cropped(to: canvas)
+                    let cameraImage = scaled.transformed(by: CGAffineTransform(translationX: cameraRect.midX - scaled.extent.midX, y: cameraRect.midY - scaled.extent.midY)).cropped(to: innerRect.intersection(canvas))
+                    let cameraLayer = cameraImage.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: borderLayer, kCIInputMaskImageKey: innerMask])
+                    let opacityMask = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: opacity)).cropped(to: canvas)
+                    let fadedCamera = cameraLayer.applyingFilter("CIBlendWithAlphaMask", parameters: [kCIInputBackgroundImageKey: clear, kCIInputMaskImageKey: opacityMask])
+                    cameraBackdrop = fadedCamera.composited(over: cameraBackdrop).cropped(to: canvas)
                 }
+                composed = cameraBackdrop.applyingFilter("CISRGBToneCurveToLinear").cropped(to: canvas)
             }
             context.render(composed, to: buffer, bounds: canvas, colorSpace: space)
+            // Describe the sRGB pixels so the encoder can convert and tag Rec.709 correctly.
+            CVBufferSetAttachment(buffer, kCVImageBufferCGColorSpaceKey, space, .shouldPropagate)
+            CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
+            CVBufferSetAttachment(buffer, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_sRGB, .shouldPropagate)
+            CVBufferSetAttachment(buffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
             guard adaptor.append(buffer, withPresentationTime: pts) else { throw writer.error ?? Failure(message: "Falha ao escrever frame.") }
             let pct = Int(100 * time / duration)
             if pct != progress { progress = pct; emit(["event": "progress", "progress": min(99, pct)]) }
@@ -673,6 +864,8 @@ func makeCursor(size: Double) -> CIImage {
             let args = CommandLine.arguments
             guard args.count >= 2 else { throw Failure(message: "Comando ausente.") }
             switch args[1] {
+            case "audio-status":
+                emit(["event": "audio-status", "microphoneAuthorization": AVCaptureDevice.authorizationStatus(for: .audio).rawValue, "screenRecordingAuthorized": CGPreflightScreenCaptureAccess(), "microphone": AVCaptureDevice.default(for: .audio)?.localizedName ?? ""])
             case "camera-preview":
                 let status = AVCaptureDevice.authorizationStatus(for: .video)
                 let allowed: Bool
@@ -700,7 +893,14 @@ func makeCursor(size: Double) -> CIImage {
             case "inspect": try await emitMedia(metadata(args[2]))
             case "record":
                 // ScreenCaptureKit requests authorization itself; its result is authoritative.
-                let cameraPath = args.count > 3 ? args[3] : nil
+                let cameraPath = args.count > 3 && !args[3].hasPrefix("--") ? args[3] : nil
+                let systemAudio = args.contains("--system-audio"), microphone = args.contains("--microphone")
+                if microphone {
+                    let status = AVCaptureDevice.authorizationStatus(for: .audio)
+                    var allowed = status == .authorized
+                    if status == .notDetermined { allowed = await AVCaptureDevice.requestAccess(for: .audio) }
+                    guard allowed else { throw Failure(message: "Acesso ao microfone negado. Autorize o Frame Studio em Ajustes do Sistema > Privacidade e Segurança > Microfone.") }
+                }
                 if cameraPath != nil {
                     let status = AVCaptureDevice.authorizationStatus(for: .video)
                     var allowed = status == .authorized
@@ -713,10 +913,11 @@ func makeCursor(size: Double) -> CIImage {
                 let config = SCStreamConfiguration()
                 let (width, height) = captureSize(width: CGDisplayPixelsWide(display.displayID), height: CGDisplayPixelsHigh(display.displayID))
                 config.width = width; config.height = height
-                config.minimumFrameInterval = CMTime(value: 1, timescale: 60); config.queueDepth = 3; config.showsCursor = false; config.capturesAudio = false; config.pixelFormat = kCVPixelFormatType_32BGRA
-                let capture = try Capture(path: args[2], bounds: CGDisplayBounds(display.displayID), width: config.width, height: config.height, cameraPath: cameraPath)
+                config.minimumFrameInterval = CMTime(value: 1, timescale: 60); config.queueDepth = 3; config.showsCursor = false; config.capturesAudio = systemAudio; config.sampleRate = 48000; config.channelCount = 2; config.excludesCurrentProcessAudio = true; config.pixelFormat = kCVPixelFormatType_32BGRA
+                let capture = try Capture(path: args[2], bounds: CGDisplayBounds(display.displayID), width: config.width, height: config.height, cameraPath: cameraPath, systemAudio: systemAudio, microphone: microphone)
                 let stream = SCStream(filter: SCContentFilter(display: display, excludingWindows: ownWindows), configuration: config, delegate: capture)
                 capture.stream = stream; try stream.addStreamOutput(capture, type: .screen, sampleHandlerQueue: capture.queue)
+                if systemAudio { try stream.addStreamOutput(capture, type: .audio, sampleHandlerQueue: capture.queue) }
                 capture.begin(); try await stream.startCapture()
                 // stdin is a private control pipe from Rust; EOF also finalizes the file.
                 await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in DispatchQueue.global().async { _ = readLine(); continuation.resume() } }

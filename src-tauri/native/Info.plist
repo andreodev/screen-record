@@ -12,5 +12,6 @@
   <key>CFBundleVersion</key><string>1</string>
   <key>NSCameraUsageDescription</key>
   <string>Frame Studio Native uses the selected camera for a live preview and to record your webcam.</string>
+<key>NSMicrophoneUsageDescription</key><string>O Frame Studio usa o microfone para gravar sua voz em uma trilha independente e sincronizada com a tela.</string>
 </dict>
 </plist>

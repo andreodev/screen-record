@@ -1,10 +1,11 @@
+import type { CameraMotion } from "./cinematic.ts";
 export type Point = { x: number; y: number };
 export type CursorEvent = Point & { t: number; down: boolean; rightDown?: boolean; middleDown?: boolean; kind?: string; typing?: boolean };
 export type Zoom = Point & { id: string; start: number; end: number; scale: number; enabled: boolean; follow?: boolean; instant?: boolean; manualOverride?: boolean; roiWidth?: number; roiHeight?: number };
 export type Camera = Point & { scale: number };
 export type CameraKey = Camera & { t: number; cut?: boolean };
 export type CameraFrame = { left: number; top: number; width: number; height: number };
-export type Appearance = { background: number; padding: number; radius: number; shadow: number; cursorSize: number; smooth: boolean; aspect: string; cropFill?: boolean; cropFollowCursor?: boolean; cameraMode?: "auto" | "manual" | "hybrid"; backgroundMode?: "gradient" | "color" | "wallpaper" | "video-blur"; colors?: [string, string]; cursorSmooth?: boolean; wallpaper?: string; cursorAsset?: string; cursorTheme?: string; backgroundBlur?: number; cursorMotion?: "original" | "smooth" | "medium" | "rapid"; cameraSpring?: boolean; motionBlur?: { cursor: number; zoom: number; pan: number }; clickSounds?: boolean; clickSoundVolume?: number };
+export type Appearance = { background: number; padding: number; radius: number; shadow: number; cursorSize: number; smooth: boolean; aspect: string; cropFill?: boolean; cropFollowCursor?: boolean; cameraMode?: "auto" | "manual" | "hybrid"; backgroundMode?: "gradient" | "color" | "wallpaper" | "video-blur"; colors?: [string, string]; cursorSmooth?: boolean; wallpaper?: string; cursorAsset?: string; cursorTheme?: string; backgroundBlur?: number; cursorMotion?: "original" | "smooth" | "medium" | "rapid"; cameraSpring?: boolean; cameraMotion?: CameraMotion; motionBlur?: { cursor: number; zoom: number; pan: number }; clickSounds?: boolean; clickSoundVolume?: number };
 export function cursorMotionFor(appearance: Appearance): NonNullable<Appearance["cursorMotion"]> {
   return appearance.cursorMotion ?? (appearance.cursorSmooth === false ? "original" : "medium");
 }
@@ -40,7 +41,11 @@ export function visibleSpans(sourceAspect: number, outputAspect: number, fill: b
   return fill ? { x: Math.min(1, outputAspect / sourceAspect), y: Math.min(1, sourceAspect / outputAspect) } : { x: 1, y: 1 };
 }
 const ease = (n: number) => { const v = clamp(n, 0, 1); return v * v * v * (v * (v * 6 - 15) + 10); };
-const MOBILE_AUTO_SCALE_BIAS = 1.12;
+/** Video bounds relative to the padded canvas. Camera zoom is applied after this layout fit. */
+export function frameLayout(sourceAspect: number, outputAspect: number, fill: boolean) {
+  const width = sourceAspect / outputAspect, height = outputAspect / sourceAspect;
+  return { width: fill ? Math.max(1, width) : Math.min(1, width), height: fill ? Math.max(1, height) : Math.min(1, height) };
+}
 export function cursorAt(t: number, events: CursorEvent[]): CursorEvent | null {
   if (!events.length) return null;
   let low = 0, high = events.length;
@@ -115,7 +120,7 @@ export function zoomsForMode(zooms: Zoom[], mode: NonNullable<Appearance["camera
   if (mode === "manual") return zooms.filter(zoom => !isAutoZoom(zoom));
   return [...zooms.filter(isAutoZoom), ...zooms.filter(zoom => !isAutoZoom(zoom))];
 }
-export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, events: CursorEvent[] = [], spring = false, spanX = 1, spanY = 1, followCropCursor = false, shake = false, sourceAspect = 16 / 9, outputAspect = sourceAspect): CameraKey[] {
+export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, events: CursorEvent[] = [], spring = false, spanX = 1, spanY = 1, followCropCursor = false, _shake = false, sourceAspect = 16 / 9, outputAspect = sourceAspect, dampingRatio?: number): CameraKey[] {
   const result: CameraKey[] = [];
   const instantTimes = new Set<number>();
   const scheduled = zooms.map((zoom, index) => ({ zoom: { ...zoom }, index, focus: { x: zoom.x, y: zoom.y } }))
@@ -139,6 +144,18 @@ export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, eve
   let active: typeof scheduled = [];
   let cropX = .5, cropY = .5, previousFrameTime = 0;
   let cameraState: Camera = { x: .5, y: .5, scale: 1 };
+  let hasFocusedVerticalScene = false;
+  const holdVerticalAutoFrame = outputAspect < 1 && scheduled.some(({ zoom }) => isAutoZoom(zoom));
+  const fillLayout = spanX < .999 || spanY < .999;
+  const layout = fillLayout
+    ? { width: spanX < .999 ? 1 / spanX : 1, height: spanY < .999 ? 1 / spanY : 1 }
+    : frameLayout(sourceAspect, outputAspect, false);
+  const coverageScale = Math.max(1 / layout.width, 1 / layout.height);
+  // The camera window is computed from the fitted recording rectangle, not
+  // from source bounds alone. This keeps edge-focused ROIs inside the actual
+  // pixels available after contain/cover layout.
+  const cameraSpanX = (scale: number) => Math.min(1, 1 / (layout.width * scale));
+  const cameraSpanY = (scale: number) => Math.min(1, 1 / (layout.height * scale));
   const cuts = new Set(zooms.filter(z => z.enabled && z.instant).flatMap(z => [z.start, z.end]));
   const times = [...new Set([...Array.from({length: Math.ceil(duration * 60) + 1}, (_, i) => Math.min(duration, i / 60)), ...cuts].filter(t => t >= 0 && t <= duration))].sort((a, b) => a - b);
   for (const t of times) {
@@ -149,34 +166,37 @@ export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, eve
       next++;
     }
     if (added) active.sort((a, b) => a.index - b.index);
+    if (active.some(({ zoom }) => isAutoZoom(zoom))) hasFocusedVerticalScene = true;
     const point = active.some(item => item.zoom.follow) ? cursorAt(t, events) : null;
     let target: Camera = { x: .5, y: .5, scale: 1 };
     for (const item of active) {
       let zoom = item.zoom;
       if (zoom.follow && point) {
-        const zoneX = .12 * spanX / zoom.scale, zoneY = .12 * spanY / zoom.scale;
+      const zoneX = .12 * cameraSpanX(zoom.scale), zoneY = .12 * cameraSpanY(zoom.scale);
         const dx = point.x - item.focus.x, dy = point.y - item.focus.y;
         const followAlpha = 1 - Math.exp(-Math.max(0, t - previousFrameTime) / (smooth ? .2 : .1));
         item.focus.x += Math.sign(dx) * Math.max(0, Math.abs(dx) - zoneX) * followAlpha;
         item.focus.y += Math.sign(dy) * Math.max(0, Math.abs(dy) - zoneY) * followAlpha;
         zoom = { ...zoom, ...item.focus };
       }
-      const frameWidth = Math.min(1, sourceAspect / outputAspect);
-      const frameHeight = Math.min(1, outputAspect / sourceAspect);
       const roiScale = Math.min(
-        .78 / Math.max(.08, frameWidth * (zoom.roiWidth ?? .3)),
-        .76 / Math.max(.08, frameHeight * (zoom.roiHeight ?? .64)),
+        .78 / Math.max(.08, layout.width * (zoom.roiWidth ?? .3)),
+        .76 / Math.max(.08, layout.height * (zoom.roiHeight ?? .64)),
       );
-      // Give vertical auto scenes a little more image height so the recording
-      // uses more of the canvas while keeping visible headroom around it.
-      const mobileScale = clamp(Math.max(roiScale, zoom.scale) * MOBILE_AUTO_SCALE_BIAS, 1, 3);
-      // Desktop should retain context; vertical output needs additional scale to counter
-      // the landscape frame's letterboxing and make the active ROI readable.
-      const scale = isAutoZoom(zoom) ? outputAspect < 1 ? mobileScale : Math.min(1.4, zoom.scale) : clamp(zoom.scale, 1, 3);
-      const halfX = spanX / (2 * scale), halfY = spanY / (2 * scale);
+      // Portrait auto scenes first reach the exact cover scale implied by the
+      // fitted frame. This is derived from geometry, not a visual multiplier.
+      const scale = isAutoZoom(zoom) && outputAspect < 1
+        ? Math.max(zoom.scale, roiScale, coverageScale)
+        : isAutoZoom(zoom) ? Math.min(1.4, zoom.scale) : clamp(zoom.scale, 1, 3);
+      const halfX = cameraSpanX(scale) / 2, halfY = cameraSpanY(scale) / 2;
       target = { x: clamp(zoom.x, halfX, 1 - halfX), y: clamp(zoom.y, halfY, 1 - halfY), scale };
       if (zoom.instant) cameraState = target;
     }
+    // In vertical output, returning to scale 1 after each automatic block makes
+    // a landscape source collapse back to a short, letterboxed strip. Keep the
+    // last focused composition through gaps; a manual scale-1 segment can still
+    // deliberately create an overview.
+    if (!active.length && holdVerticalAutoFrame && hasFocusedVerticalScene) target = { ...cameraState };
     if (followCropCursor && (spanX < .999 || spanY < .999)) {
       if (active.length) { cropX = target.x; cropY = target.y; }
       else {
@@ -202,7 +222,7 @@ export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, eve
         scale: cameraState.scale + (target.scale - cameraState.scale) * amount,
       };
     }
-    const halfX = spanX / (2 * cameraState.scale), halfY = spanY / (2 * cameraState.scale);
+    const halfX = cameraSpanX(cameraState.scale) / 2, halfY = cameraSpanY(cameraState.scale) / 2;
     cameraState.x = clamp(cameraState.x, halfX, 1 - halfX);
     cameraState.y = clamp(cameraState.y, halfY, 1 - halfY);
     previousFrameTime = t;
@@ -211,7 +231,7 @@ export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, eve
   }
   if (spring) {
     // Integrate damped motion offline, so seeking and native export share identical positions.
-    const mass = 2.25, stiffness = smooth ? 170 : 250, damping = smooth ? 36 : 40;
+    const mass = 2.25, stiffness = smooth ? 170 : 250, damping = dampingRatio === undefined ? (smooth ? 36 : 40) : 2 * Math.sqrt(stiffness * mass) * dampingRatio;
     let value: Camera = { x: .5, y: .5, scale: 1 }, velocity: Camera = { x: 0, y: 0, scale: 0 };
     let previousTime = 0;
     for (const key of result) {
@@ -223,25 +243,9 @@ export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, eve
         const acceleration = (stiffness * (key[prop] - value[prop]) - damping * velocity[prop]) / mass;
         velocity[prop] += acceleration * dt / 4; value[prop] += velocity[prop] * dt / 4;
       }
-      value.scale = clamp(value.scale, 1, 3);
-      const halfX = spanX / (2 * value.scale), halfY = spanY / (2 * value.scale);
+      value.scale = clamp(value.scale, 1, Math.max(3, coverageScale));
+      const halfX = cameraSpanX(value.scale) / 2, halfY = cameraSpanY(value.scale) / 2;
       key.x = clamp(value.x, halfX, 1 - halfX); key.y = clamp(value.y, halfY, 1 - halfY); key.scale = value.scale;
-    }
-  }
-  if (shake) {
-    for (let i = 1; i < result.length - 1; i++) {
-      const key = result[i], before = result[i - 1], after = result[i + 1];
-      if (key.cut || after.cut) continue;
-      const movement = clamp(
-        Math.abs(after.scale - before.scale) * 18 +
-          Math.hypot((after.x - before.x) / spanX, (after.y - before.y) / spanY) * 20,
-        0,
-        1,
-      );
-      if (movement < 0.01) continue;
-      const halfX = spanX / (2 * key.scale), halfY = spanY / (2 * key.scale);
-      key.x = clamp(key.x + Math.sin(key.t * Math.PI * 16) * 0.001 * movement, halfX, 1 - halfX);
-      key.y = clamp(key.y + Math.sin(key.t * Math.PI * 18 + 0.7) * 0.0007 * movement, halfY, 1 - halfY);
     }
   }
   return result;

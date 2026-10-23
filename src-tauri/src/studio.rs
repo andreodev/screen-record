@@ -9,20 +9,31 @@ use crate::Recorder;
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Media {
     path: String, duration: f64, width: u32, height: u32,
-    cursor: Vec<Pointer>, cursor_captured: bool,
+    cursor: Vec<Pointer>, cursor_captured: bool, #[serde(default)] has_audio: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")] webcam_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] microphone_path: Option<String>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Pointer { t: f64, x: f64, y: f64, down: bool, #[serde(default, skip_serializing_if = "Option::is_none")] kind: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] right_down: Option<bool>, #[serde(default, skip_serializing_if = "Option::is_none")] middle_down: Option<bool>, #[serde(default, skip_serializing_if = "Option::is_none")] typing: Option<bool> }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Appearance { background: usize, padding: f64, radius: f64, shadow: f64, cursor_size: f64, smooth: bool, aspect: String, #[serde(default)] crop_fill: Option<bool>, #[serde(default)] crop_follow_cursor: Option<bool>, #[serde(default)] camera_mode: Option<String>, colors: Option<[String; 2]>, background_mode: Option<String>, cursor_smooth: Option<bool>, wallpaper: Option<String>, cursor_asset: Option<String>, cursor_theme: Option<String>, background_blur: Option<f64>, cursor_motion: Option<String>, camera_spring: Option<bool>, motion_blur: Option<MotionBlur>, #[serde(default)] click_sounds: Option<bool>, #[serde(default)] click_sound_volume: Option<f64> }
+struct Appearance { background: usize, padding: f64, radius: f64, shadow: f64, cursor_size: f64, smooth: bool, aspect: String, #[serde(default)] crop_fill: Option<bool>, #[serde(default)] crop_follow_cursor: Option<bool>, #[serde(default)] camera_mode: Option<String>, colors: Option<[String; 2]>, background_mode: Option<String>, cursor_smooth: Option<bool>, wallpaper: Option<String>, cursor_asset: Option<String>, cursor_theme: Option<String>, background_blur: Option<f64>, cursor_motion: Option<String>, camera_spring: Option<bool>, #[serde(default, skip_serializing_if = "Option::is_none")] camera_motion: Option<CameraMotion>, motion_blur: Option<MotionBlur>, #[serde(default)] click_sounds: Option<bool>, #[serde(default)] click_sound_volume: Option<f64> }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Zoom { id: String, start: f64, end: f64, x: f64, y: f64, scale: f64, enabled: bool, #[serde(default)] follow: bool, #[serde(default)] instant: bool, #[serde(default)] manual_override: bool }
 #[derive(Clone, Serialize, Deserialize)]
 struct Trim { start: f64, end: f64 }
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CameraMotion { style: String, shake: bool, #[serde(default)] webcam_shake: bool, intensity: f64, duration: f64, frequency: f64, spring: bool, damping: f64, blur: bool, blur_intensity: f64, #[serde(default)] impacts: Vec<f64> }
+fn valid_camera_motion(motion: &CameraMotion, duration: f64) -> bool {
+    ["smooth", "cinematic", "dynamic"].contains(&motion.style.as_str())
+        && bounded(motion.intensity, 0., 0.004) && bounded(motion.duration, 0.08, 0.18)
+        && bounded(motion.frequency, 8., 16.) && bounded(motion.damping, 0.8, 1.5)
+        && bounded(motion.blur_intensity, 0., 0.5) && motion.impacts.len() <= 10000
+        && motion.impacts.iter().all(|t| bounded(*t, 0., duration))
+}
 #[derive(Clone, Serialize, Deserialize)]
 struct MotionBlur { cursor: f64, zoom: f64, pan: f64 }
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -36,23 +47,23 @@ struct Effect { id: String, kind: String, start: f64, end: f64, x: f64, y: f64, 
 struct BackgroundAudio { path: String, volume: f64 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Webcam { path: String, x: f64, y: f64, size: f64, shape: String, #[serde(default, skip_serializing_if = "Vec::is_empty")] keyframes: Vec<WebcamKeyframe>, #[serde(default, skip_serializing_if = "Option::is_none")] mode: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] opacity: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] border: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] shadow: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] border_radius: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] layouts: Option<WebcamLayouts> }
+struct Webcam { #[serde(default, skip_serializing_if = "Option::is_none")] zoom_behavior: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] zoom_size: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] transition_duration: Option<f64>, path: String, x: f64, y: f64, size: f64, shape: String, #[serde(default, skip_serializing_if = "Vec::is_empty")] keyframes: Vec<WebcamKeyframe>, #[serde(default, skip_serializing_if = "Option::is_none")] mode: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] opacity: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] border: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] shadow: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] border_radius: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] layouts: Option<WebcamLayouts> }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WebcamKeyframe { t: f64, x: f64, y: f64, size: f64, #[serde(default, skip_serializing_if = "Option::is_none")] opacity: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] border_radius: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] easing: Option<String> }
 #[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-struct WebcamLayout { x: Option<f64>, y: Option<f64>, size: Option<f64>, shape: Option<String>, opacity: Option<f64>, border: Option<f64>, shadow: Option<f64>, border_radius: Option<f64>, mode: Option<String>, #[serde(default)] keyframes: Vec<WebcamKeyframe> }
+struct WebcamLayout { #[serde(default, skip_serializing_if = "Option::is_none")] zoom_behavior: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] zoom_size: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] transition_duration: Option<f64>, x: Option<f64>, y: Option<f64>, size: Option<f64>, shape: Option<String>, opacity: Option<f64>, border: Option<f64>, shadow: Option<f64>, border_radius: Option<f64>, mode: Option<String>, #[serde(default)] keyframes: Vec<WebcamKeyframe> }
 #[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct WebcamLayouts { portrait: Option<WebcamLayout>, landscape: Option<WebcamLayout> }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct Project { version: u32, media_path: String, name: String, zooms: Vec<Zoom>, appearance: Appearance, trim: Trim, #[serde(default, skip_serializing_if = "Option::is_none")] clips: Option<Vec<Clip>>, #[serde(default, skip_serializing_if = "Option::is_none")] effects: Option<Vec<Effect>>, #[serde(default, skip_serializing_if = "Option::is_none")] background_audio: Option<BackgroundAudio>, #[serde(default, skip_serializing_if = "Option::is_none")] webcam: Option<Webcam> }
+pub(crate) struct Project { version: u32, media_path: String, name: String, zooms: Vec<Zoom>, appearance: Appearance, trim: Trim, #[serde(default, skip_serializing_if = "Option::is_none")] clips: Option<Vec<Clip>>, #[serde(default, skip_serializing_if = "Option::is_none")] effects: Option<Vec<Effect>>, #[serde(default, skip_serializing_if = "Option::is_none")] background_audio: Option<BackgroundAudio>, #[serde(default, skip_serializing_if = "Option::is_none")] microphone: Option<BackgroundAudio>, #[serde(default, skip_serializing_if = "Option::is_none")] source_volume: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] webcam: Option<Webcam> }
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Key { t: f64, x: f64, y: f64, scale: f64, #[serde(default)] cut: bool }
 #[derive(Deserialize)]
-pub(crate) struct ExportSettings { start: f64, end: f64, #[serde(default)] ranges: Option<Vec<Clip>>, #[serde(default)] effects: Vec<Effect>, #[serde(default, rename = "backgroundAudio")] background_audio: Option<BackgroundAudio>, #[serde(default)] webcam: Option<Webcam>, appearance: Appearance, keys: Vec<Key>, cursor: Vec<Pointer>, #[serde(default, rename = "rawCursor")] raw_cursor: Vec<Pointer>, #[serde(default = "default_resolution")] resolution: u32, #[serde(default = "default_fps")] fps: u32 }
+pub(crate) struct ExportSettings { start: f64, end: f64, #[serde(default)] ranges: Option<Vec<Clip>>, #[serde(default)] effects: Vec<Effect>, #[serde(default, rename = "backgroundAudio")] background_audio: Option<BackgroundAudio>, #[serde(default)] microphone: Option<BackgroundAudio>, #[serde(default, rename = "sourceVolume")] source_volume: Option<f64>, #[serde(default)] webcam: Option<Webcam>, appearance: Appearance, keys: Vec<Key>, cursor: Vec<Pointer>, #[serde(default, rename = "rawCursor")] raw_cursor: Vec<Pointer>, #[serde(default = "default_resolution")] resolution: u32, #[serde(default = "default_fps")] fps: u32 }
 fn default_resolution() -> u32 { 1080 }
 fn default_fps() -> u32 { 30 }
 fn validate_export_format(resolution: u32, fps: u32) -> Result<(), String> {
@@ -65,7 +76,7 @@ fn helper(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let bundled = app.path().resource_dir().map_err(|e| e.to_string())?.join("FrameNative.app/Contents/MacOS/frame-native");
     if bundled.is_file() { return Ok(bundled); }
     #[cfg(debug_assertions)]
-    { let development = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("native/FrameNative.app/Contents/MacOS/frame-native"); if development.is_file() { return Ok(development); } }
+    { let development = PathBuf::from(env!("FRAME_NATIVE_HELPER")); if development.is_file() { return Ok(development); } }
     Err("Motor nativo não encontrado. Recompile o aplicativo.".into())
 }
 fn asset_catalog() -> Value { serde_json::from_str(include_str!("../resources/studio-assets/catalog.json")).expect("Bundled asset catalog is valid") }
@@ -127,7 +138,9 @@ fn current(app: &tauri::AppHandle) -> Result<Media, String> {
 fn load_media(app: &tauri::AppHandle, path: &Path) -> Result<Media, String> {
     let path = path.canonicalize().map_err(|e| format!("Vídeo não encontrado: {e}"))?;
     let value = run(app, &["inspect", &path.to_string_lossy()])?;
-    let media: Media = serde_json::from_value(value["media"].clone()).map_err(|e| e.to_string())?;
+    let mut media: Media = serde_json::from_value(value["media"].clone()).map_err(|e| e.to_string())?;
+    let microphone = path.with_extension("microphone.m4a");
+    if microphone.is_file() { app.asset_protocol_scope().allow_file(&microphone).map_err(|e| e.to_string())?; media.microphone_path = Some(microphone.to_string_lossy().into_owned()); }
     if !media.duration.is_finite() || media.duration <= 0. || media.duration > 86400. || media.width == 0 || media.height == 0 { return Err("Vídeo inválido ou duração maior que 24 horas.".into()); }
     app.asset_protocol_scope().allow_file(&path).map_err(|e| e.to_string())?;
     // Asset access is restricted to videos explicitly opened in this app session.
@@ -140,26 +153,29 @@ fn bounded(n: f64, min: f64, max: f64) -> bool { n.is_finite() && n >= min && n 
 fn valid_webcam_layout(layout: &WebcamLayout, camera: &Webcam, duration: f64) -> bool {
     let size = layout.size.unwrap_or(camera.size);
     let x = layout.x.unwrap_or(camera.x); let y = layout.y.unwrap_or(camera.y);
-    bounded(size, 0.08, 0.6) && bounded(x, size / 2., 1. - size / 2.) && bounded(y, size / 2., 1. - size / 2.)
+    valid_webcam_zoom(layout.zoom_behavior.as_deref(), layout.zoom_size, layout.transition_duration) && bounded(size, 0.08, 0.6) && bounded(x, 0., 1.) && bounded(y, 0., 1.)
         && layout.opacity.is_none_or(|v| bounded(v, 0., 1.)) && layout.border.is_none_or(|v| bounded(v, 0., 8.))
         && layout.shadow.is_none_or(|v| bounded(v, 0., 100.)) && layout.border_radius.is_none_or(|v| bounded(v, 0., 0.5))
         && layout.mode.as_deref().is_none_or(|mode| ["static", "manual", "auto", "hybrid"].contains(&mode))
-        && layout.shape.as_deref().is_none_or(|shape| ["circle", "rounded", "square"].contains(&shape))
+        && layout.shape.as_deref().is_none_or(|shape| ["circle", "rounded", "square", "rectangle"].contains(&shape))
         && layout.keyframes.len() <= 10000
         && layout.keyframes.iter().all(|key| bounded(key.t, 0., duration) && bounded(key.size, 0.08, 0.6)
-            && bounded(key.x, key.size / 2., 1. - key.size / 2.) && bounded(key.y, key.size / 2., 1. - key.size / 2.)
+            && bounded(key.x, 0., 1.) && bounded(key.y, 0., 1.)
             && key.opacity.is_none_or(|v| bounded(v, 0., 1.)) && key.border_radius.is_none_or(|v| bounded(v, 0., 0.5))
-            && key.easing.as_deref().is_none_or(|v| ["linear", "ease-in-out", "ease-out"].contains(&v)))
+            && key.easing.as_deref().is_none_or(|v| ["linear", "ease-in-out", "ease-out", "cubic-bezier"].contains(&v)))
         && layout.keyframes.windows(2).all(|keys| keys[0].t < keys[1].t)
 }
+fn valid_webcam_zoom(behavior: Option<&str>, size: Option<f64>, duration: Option<f64>) -> bool {
+    behavior.is_none_or(|v| ["keep", "shrink", "grow", "custom"].contains(&v)) && size.is_none_or(|v| bounded(v, 0.08, 0.6)) && duration.is_none_or(|v| bounded(v, 0.15, 2.))
+}
 fn valid_webcam(camera: &Webcam, duration: f64) -> bool {
-    !camera.path.is_empty() && Path::new(&camera.path).is_file() && bounded(camera.size, 0.08, 0.6)
-        && bounded(camera.x, camera.size / 2., 1. - camera.size / 2.) && bounded(camera.y, camera.size / 2., 1. - camera.size / 2.)
-        && ["circle", "rounded", "square"].contains(&camera.shape.as_str()) && camera.keyframes.len() <= 10_000
+    valid_webcam_zoom(camera.zoom_behavior.as_deref(), camera.zoom_size, camera.transition_duration) && !camera.path.is_empty() && Path::new(&camera.path).is_file() && bounded(camera.size, 0.08, 0.6)
+        && bounded(camera.x, 0., 1.) && bounded(camera.y, 0., 1.)
+        && ["circle", "rounded", "square", "rectangle"].contains(&camera.shape.as_str()) && camera.keyframes.len() <= 10_000
         && camera.keyframes.iter().all(|key| bounded(key.t, 0., duration) && bounded(key.size, 0.08, 0.6)
-            && bounded(key.x, key.size / 2., 1. - key.size / 2.) && bounded(key.y, key.size / 2., 1. - key.size / 2.)
+            && bounded(key.x, 0., 1.) && bounded(key.y, 0., 1.)
             && key.opacity.is_none_or(|v| bounded(v, 0., 1.)) && key.border_radius.is_none_or(|v| bounded(v, 0., 0.5))
-            && key.easing.as_deref().is_none_or(|v| ["linear", "ease-in-out", "ease-out"].contains(&v)))
+            && key.easing.as_deref().is_none_or(|v| ["linear", "ease-in-out", "ease-out", "cubic-bezier"].contains(&v)))
         && camera.keyframes.windows(2).all(|keys| keys[0].t < keys[1].t)
         && camera.mode.as_deref().is_none_or(|v| ["static", "manual", "auto", "hybrid"].contains(&v))
         && camera.opacity.is_none_or(|v| bounded(v, 0., 1.)) && camera.border.is_none_or(|v| bounded(v, 0., 8.))
@@ -175,6 +191,7 @@ fn validate_appearance(a: &Appearance) -> Result<(), String> {
     }
     if let Some(theme) = &a.cursor_theme { if !catalog["cursors"].as_array().unwrap().iter().any(|item| item["group"].as_str() == Some(theme.as_str()) && item["id"].as_str().is_some_and(|id| id.starts_with("sets/"))) { return Err("Conjunto de cursores inválido.".into()); } }
     if a.background_mode.as_deref() == Some("wallpaper") && a.wallpaper.is_none() { return Err("Escolha um wallpaper.".into()); }
+    if a.camera_motion.as_ref().is_some_and(|m| !valid_camera_motion(m, 86400.)) { return Err("Configuração de Camera Motion inválida.".into()); }
     if a.motion_blur.as_ref().is_some_and(|b| [b.cursor, b.zoom, b.pan].iter().any(|n| !bounded(*n, 0., 1.))) { return Err("Intensidade de motion blur inválida.".into()); }
     if a.background_blur.is_some_and(|n| !bounded(n, 0., 30.)) || a.cursor_motion.as_ref().is_some_and(|m| !["original", "smooth", "medium", "rapid"].contains(&m.as_str())) { return Err("Configuração de animação inválida.".into()); }
     if a.click_sound_volume.is_some_and(|n| !bounded(n, 0., 1.)) { return Err("Volume dos cliques inválido.".into()); }
@@ -193,6 +210,7 @@ fn validate_effects(effects: &[Effect], duration: f64) -> Result<(), String> {
     Ok(())
 }
 fn validate_project(project: &Project, media: &Media) -> Result<(), String> {
+    if project.appearance.camera_motion.as_ref().is_some_and(|m| !valid_camera_motion(m, media.duration)) { return Err("Impactos fora do vídeo.".into()); }
     validate_appearance(&project.appearance)?; validate_trim(project.trim.start, project.trim.end, media.duration)?;
     if let Some(clips) = &project.clips {
         validate_ranges(clips, media.duration)?;
@@ -200,7 +218,8 @@ fn validate_project(project: &Project, media: &Media) -> Result<(), String> {
     }
     if project.name.len() > 300 || project.zooms.len() > 10000 || project.zooms.iter().any(|z| z.id.len() > 100 || !bounded(z.start, 0., media.duration) || !bounded(z.end, z.start + 0.1, media.duration + 0.05) || !bounded(z.x, 0., 1.) || !bounded(z.y, 0., 1.) || !bounded(z.scale, 1., 3.)) { return Err("Segmentos de zoom inválidos.".into()); }
     if let Some(effects) = &project.effects { validate_effects(effects, media.duration)?; }
-    if project.background_audio.as_ref().is_some_and(|audio| audio.path.is_empty() || !Path::new(&audio.path).is_file() || !bounded(audio.volume, 0., 1.)) { return Err("Trilha de áudio inválida.".into()); }
+    if project.source_volume.is_some_and(|v| !bounded(v, 0., 1.)) { return Err("Volume da gravação inválido.".into()); }
+    for audio in [project.background_audio.as_ref(), project.microphone.as_ref()].into_iter().flatten() { if audio.path.is_empty() || !Path::new(&audio.path).is_file() || !bounded(audio.volume, 0., 1.) { return Err("Trilha de áudio inválida.".into()); } }
     if project.webcam.as_ref().is_some_and(|camera| !valid_webcam(camera, media.duration)) { return Err("Configuração da webcam inválida.".into()); }
     Ok(())
 }
@@ -226,7 +245,7 @@ fn read_document(path: &Path) -> Result<(Project, PathBuf), String> {
 }
 fn open_document(app: &tauri::AppHandle, path: &Path) -> Result<Value, String> {
     let (mut project, canonical) = read_document(path)?;
-    if let Some(audio) = &mut project.background_audio {
+    for audio in [&mut project.background_audio, &mut project.microphone].into_iter().flatten() {
         let package = path.is_dir();
         let raw = PathBuf::from(&audio.path);
         if package && (raw.is_absolute() || raw.components().any(|part| matches!(part, std::path::Component::ParentDir))) { return Err("O pacote deve usar uma trilha de áudio interna.".into()); }
@@ -286,14 +305,15 @@ fn write_manifest(package: &Path, project: &Project, source: &Path) -> Result<()
     let package = package.canonicalize().map_err(|e| e.to_string())?;
     let source = source.canonicalize().map_err(|e| e.to_string())?;
     let relative = source.strip_prefix(&package).map_err(|_| "A mídia deve estar dentro do pacote.")?;
-    let mut document = project.clone(); document.version = if document.webcam.as_ref().is_some_and(|camera| !camera.keyframes.is_empty() || camera.layouts.is_some() || camera.mode.is_some()) { 11 } else if document.appearance.click_sounds.is_some() || document.appearance.click_sound_volume.is_some() { 9 } else if document.webcam.is_some() { 8 } else if document.appearance.camera_mode.is_some() || document.appearance.crop_follow_cursor == Some(true) { 7 } else if document.background_audio.is_some() { 6 } else if document.effects.as_ref().is_some_and(|effects| !effects.is_empty()) { 5 } else if document.appearance.motion_blur.is_some() || document.zooms.iter().any(|z| z.instant) || document.clips.as_ref().is_some_and(|clips| clips.iter().any(|c| c.speed.is_some() || c.hide_cursor.is_some() || c.cursor_original.is_some())) { 4 } else if document.clips.is_some() { 3 } else { 2 }; document.media_path = relative.to_string_lossy().into_owned();
-    if let Some(audio) = &mut document.background_audio {
+    let mut document = project.clone(); document.version = if document.microphone.is_some() || document.source_volume.is_some() { 11 } else if document.webcam.as_ref().is_some_and(|camera| !camera.keyframes.is_empty() || camera.layouts.is_some() || camera.mode.is_some()) { 11 } else if document.appearance.click_sounds.is_some() || document.appearance.click_sound_volume.is_some() { 9 } else if document.webcam.is_some() { 8 } else if document.appearance.camera_mode.is_some() || document.appearance.crop_follow_cursor == Some(true) { 7 } else if document.background_audio.is_some() { 6 } else if document.effects.as_ref().is_some_and(|effects| !effects.is_empty()) { 5 } else if document.appearance.motion_blur.is_some() || document.zooms.iter().any(|z| z.instant) || document.clips.as_ref().is_some_and(|clips| clips.iter().any(|c| c.speed.is_some() || c.hide_cursor.is_some() || c.cursor_original.is_some())) { 4 } else if document.clips.is_some() { 3 } else { 2 }; document.media_path = relative.to_string_lossy().into_owned();
+    for (kind, audio) in [("background", &mut document.background_audio), ("microphone", &mut document.microphone)] {
+        let Some(audio) = audio else { continue };
         let source = Path::new(&audio.path).canonicalize().map_err(|e| format!("Trilha de áudio não encontrada: {e}"))?;
         let extension = source.extension().and_then(|e| e.to_str()).unwrap_or("m4a");
         if let Ok(relative) = source.strip_prefix(&package) { audio.path = relative.to_string_lossy().into_owned(); }
         else {
             let mut hasher = std::collections::hash_map::DefaultHasher::new(); source.hash(&mut hasher);
-            let relative = format!("audio/background-{:016x}.{extension}", hasher.finish());
+            let relative = format!("audio/{kind}-{:016x}.{extension}", hasher.finish());
             let destination = package.join(&relative); let source_meta = std::fs::metadata(&source).map_err(|e| e.to_string())?;
             let stale = std::fs::metadata(&destination).map_or(true, |meta| meta.len() != source_meta.len() || meta.modified().ok() != source_meta.modified().ok());
             if stale { std::fs::create_dir_all(destination.parent().ok_or("Pasta de áudio inválida.")?).map_err(|e| e.to_string())?; std::fs::copy(&source, &destination).map_err(|e| format!("Não foi possível incluir a trilha de áudio: {e}"))?; }
@@ -347,7 +367,12 @@ pub(crate) async fn save_project(app: tauri::AppHandle, project: Project, save_a
             let path = if path.extension().is_some_and(|e| e == "framestudio") { path } else { path.with_extension("framestudio") };
             let source = create_package(&path, &project, &media)?; (path, source)
         };
-        let media = load_media(&app, &source)?;
+        let mut media = load_media(&app, &source)?;
+        if let Some(microphone) = read_document(&path)?.0.microphone {
+            let file = path.join(microphone.path).canonicalize().map_err(|e| e.to_string())?;
+            app.asset_protocol_scope().allow_file(&file).map_err(|e| e.to_string())?;
+            media.microphone_path = Some(file.to_string_lossy().into_owned());
+        }
         *app.state::<Recorder>().project_path.lock().map_err(|e| e.to_string())? = Some(path.clone());
         preview_package(&app, &path, &source);
         Ok(Some(json!({ "path": path, "media": media })))
@@ -395,10 +420,11 @@ pub(crate) fn stop_camera_preview(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 fn acquire(app: &tauri::AppHandle) -> Result<(), String> { if app.state::<Recorder>().busy.swap(true, Ordering::SeqCst) { Err("Já existe uma operação em andamento.".into()) } else { Ok(()) } }
-fn spawn_operation(app: tauri::AppHandle, kind: &'static str, arg: PathBuf, cleanup: bool, webcam: Option<PathBuf>) {
+fn spawn_operation(app: tauri::AppHandle, kind: &'static str, arg: PathBuf, cleanup: bool, webcam: Option<PathBuf>, capture_audio: (bool, bool)) {
     std::thread::spawn(move || {
         let result = (|| -> Result<(&str, Value), String> {
             let mut command = Command::new(helper(&app)?); command.arg(kind).arg(&arg); if let Some(path) = &webcam { command.arg(path); }
+            if capture_audio.0 { command.arg("--system-audio"); } if capture_audio.1 { command.arg("--microphone"); }
             let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn().map_err(|e| e.to_string())?;
             *app.state::<Recorder>().control.lock().map_err(|e| e.to_string())? = child.stdin.take();
             let stdout = child.stdout.take().ok_or("Não foi possível ler o motor nativo.")?;
@@ -426,7 +452,7 @@ fn spawn_operation(app: tauri::AppHandle, kind: &'static str, arg: PathBuf, clea
                 let mut media = load_media(&app, &arg)?;
                 if let Some(camera_path) = &webcam { if camera_path.is_file() { media.webcam_path = Some(camera_path.canonicalize().map_err(|e| e.to_string())?.to_string_lossy().into_owned()); app.asset_protocol_scope().allow_file(camera_path).map_err(|e| e.to_string())?; } }
                 if let Some(package) = arg.parent().and_then(|p| p.parent()) {
-                let initial = Project { version: if media.webcam_path.is_some() { 8 } else { 2 }, name: "Nova gravação".into(), media_path: media.path.clone(), zooms: vec![], appearance: Appearance { background: 0, padding: 9., radius: 12., shadow: 35., cursor_size: 24., smooth: true, aspect: "auto".into(), crop_fill: None, crop_follow_cursor: None, camera_mode: None, colors: None, background_mode: None, cursor_smooth: None, wallpaper: None, cursor_asset: None, cursor_theme: None, background_blur: None, cursor_motion: None, camera_spring: None, motion_blur: None, click_sounds: Some(true), click_sound_volume: Some(0.3) }, trim: Trim { start: 0., end: media.duration }, clips: None, effects: None, background_audio: None, webcam: media.webcam_path.as_ref().map(|path| Webcam { path: path.clone(), x: 0.78, y: 0.78, size: 0.24, shape: "circle".into(), keyframes: vec![], mode: None, opacity: None, border: None, shadow: None, border_radius: None, layouts: None }) };
+                let initial = Project { version: if media.webcam_path.is_some() { 8 } else { 2 }, name: "Nova gravação".into(), media_path: media.path.clone(), zooms: vec![], appearance: Appearance { background: 0, padding: 9., radius: 12., shadow: 35., cursor_size: 24., smooth: true, aspect: "auto".into(), crop_fill: None, crop_follow_cursor: None, camera_mode: None, colors: None, background_mode: None, cursor_smooth: None, wallpaper: None, cursor_asset: None, cursor_theme: None, background_blur: None, cursor_motion: None, camera_spring: None, camera_motion: None, motion_blur: None, click_sounds: Some(true), click_sound_volume: Some(0.3) }, trim: Trim { start: 0., end: media.duration }, clips: None, effects: None, background_audio: None, microphone: media.microphone_path.as_ref().map(|path| BackgroundAudio { path: path.clone(), volume: 1. }), source_volume: None, webcam: media.webcam_path.as_ref().map(|path| Webcam { zoom_behavior: None, zoom_size: None, transition_duration: None, path: path.clone(), x: 0.78, y: 0.78, size: 0.24, shape: "circle".into(), keyframes: vec![], mode: None, opacity: None, border: None, shadow: None, border_radius: None, layouts: None }) };
                     write_manifest(package, &initial, &arg)?;
                     *app.state::<Recorder>().project_path.lock().map_err(|e| e.to_string())? = Some(package.to_path_buf());
                     preview_package(&app, package, &arg);
@@ -445,11 +471,15 @@ fn spawn_operation(app: tauri::AppHandle, kind: &'static str, arg: PathBuf, clea
     });
 }
 #[tauri::command]
-pub(crate) fn start_recording(app: tauri::AppHandle, with_webcam: bool) -> Result<(), String> {
+pub(crate) fn open_microphone_settings() -> Result<(), String> {
+    Command::new("open").arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone").spawn().map_err(|e| e.to_string())?; Ok(())
+}
+#[tauri::command]
+pub(crate) fn start_recording(app: tauri::AppHandle, with_webcam: bool, with_system_audio: bool, with_microphone: bool) -> Result<(), String> {
     stop_camera_preview(app.clone())?;
     acquire(&app)?;
     let result = (|| { helper(&app)?; let package = app.path().home_dir().map_err(|e| e.to_string())?.join("Frame Studio Projects").join(format!("Gravação-{}.framestudio", timestamp()?)); let folder = package.join("media"); std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?; Ok::<_, String>((folder.join("recording.mov"), with_webcam.then(|| folder.join("webcam.mov")))) })();
-    match result { Ok((path, webcam)) => { spawn_operation(app, "record", path, false, webcam); Ok(()) }, Err(error) => { app.state::<Recorder>().busy.store(false, Ordering::SeqCst); Err(error) } }
+    match result { Ok((path, webcam)) => { spawn_operation(app, "record", path, false, webcam, (with_system_audio, with_microphone)); Ok(()) }, Err(error) => { app.state::<Recorder>().busy.store(false, Ordering::SeqCst); Err(error) } }
 }
 #[tauri::command]
 pub(crate) fn stop_operation(app: tauri::AppHandle) -> Result<(), String> {
@@ -468,9 +498,10 @@ pub(crate) async fn export_video(app: tauri::AppHandle, settings: ExportSettings
             if ranges.iter().any(|r| r.start < settings.start || r.end > settings.end + 0.000001) { return Err("Corte fora do trecho de exportação.".into()); }
         }
         validate_trim(settings.start, settings.end, media.duration)?; validate_appearance(&settings.appearance)?; validate_effects(&settings.effects, media.duration)?;
-        if settings.background_audio.as_ref().is_some_and(|audio| audio.path.is_empty() || !Path::new(&audio.path).is_file() || !bounded(audio.volume, 0., 1.)) { return Err("Trilha de áudio inválida.".into()); }
+        if settings.source_volume.is_some_and(|v| !bounded(v, 0., 1.)) { return Err("Volume da gravação inválido.".into()); }
+        for audio in [settings.background_audio.as_ref(), settings.microphone.as_ref()].into_iter().flatten() { if audio.path.is_empty() || !Path::new(&audio.path).is_file() || !bounded(audio.volume, 0., 1.) { return Err("Trilha de áudio inválida.".into()); } }
         if settings.webcam.as_ref().is_some_and(|camera| !valid_webcam(camera, media.duration)) { return Err("Configuração da webcam inválida.".into()); }
-        if settings.keys.len() < 2 || settings.keys.len() > 5_184_002 || settings.keys.iter().any(|k| !bounded(k.t, 0., media.duration + 0.05) || !bounded(k.x, 0., 1.) || !bounded(k.y, 0., 1.) || !bounded(k.scale, 1., 3.)) || settings.keys.windows(2).any(|k| k[0].t >= k[1].t) { return Err("Trajetória de câmera inválida.".into()); }
+        if settings.keys.len() < 2 || settings.keys.len() > 5_184_002 || settings.keys.iter().any(|k| !bounded(k.t, 0., media.duration + 0.05) || !bounded(k.x, 0., 1.) || !bounded(k.y, 0., 1.) || !bounded(k.scale, 1., 32.)) || settings.keys.windows(2).any(|k| k[0].t >= k[1].t) { return Err("Trajetória de câmera inválida.".into()); }
         if settings.raw_cursor.len() > media.cursor.len() || settings.raw_cursor.iter().any(|p| !bounded(p.t, 0., media.duration + 1.) || !bounded(p.x, 0., 1.) || !bounded(p.y, 0., 1.)) || settings.raw_cursor.windows(2).any(|p| p[0].t > p[1].t) { return Err("Trilha original de cursor inválida.".into()); }
         if settings.cursor.len() > media.cursor.len() || settings.cursor.iter().any(|p| !bounded(p.t, 0., media.duration + 1.) || !bounded(p.x, 0., 1.) || !bounded(p.y, 0., 1.)) || settings.cursor.windows(2).any(|p| p[0].t > p[1].t) { return Err("Trilha de cursor inválida.".into()); }
         let Some(destination) = choose(&app, "save-video")? else { return Ok(false) };
@@ -479,11 +510,11 @@ pub(crate) async fn export_video(app: tauri::AppHandle, settings: ExportSettings
         let result = (|| {
             let folder = app.path().app_cache_dir().map_err(|e| e.to_string())?; std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
             let path = folder.join(format!("export-{}.json", timestamp()?));
-            let job = json!({ "source": media.path, "destination": destination, "resolution": settings.resolution, "fps": settings.fps, "ranges": settings.ranges, "effects": settings.effects, "backgroundAudio": settings.background_audio, "webcam": settings.webcam, "start": settings.start, "end": settings.end, "appearance": settings.appearance, "keys": settings.keys, "cursor": settings.cursor, "rawCursor": settings.raw_cursor, "cursorCaptured": media.cursor_captured, "assetsRoot": asset_root(&app)? });
+            let job = json!({ "source": media.path, "destination": destination, "resolution": settings.resolution, "fps": settings.fps, "ranges": settings.ranges, "effects": settings.effects, "backgroundAudio": settings.background_audio, "microphone": settings.microphone, "sourceVolume": settings.source_volume, "webcam": settings.webcam, "start": settings.start, "end": settings.end, "appearance": settings.appearance, "keys": settings.keys, "cursor": settings.cursor, "rawCursor": settings.raw_cursor, "cursorCaptured": media.cursor_captured, "assetsRoot": asset_root(&app)? });
             std::fs::write(&path, serde_json::to_vec(&job).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
             Ok::<_, String>(path)
         })();
-        match result { Ok(path) => { spawn_operation(app, "export", path, true, None); Ok(true) }, Err(error) => { app.state::<Recorder>().busy.store(false, Ordering::SeqCst); Err(error) } }
+        match result { Ok(path) => { spawn_operation(app, "export", path, true, None, (false, false)); Ok(true) }, Err(error) => { app.state::<Recorder>().busy.store(false, Ordering::SeqCst); Err(error) } }
     }).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
@@ -519,7 +550,21 @@ mod tests {
         assert!(validate_ranges(&[Clip { start: 0., end: 2., speed: Some(4.), ..Default::default() }], 3.).is_ok());
     }
     #[test]
+    fn cinematic_motion_is_bounded_and_persisted() {
+        let mut motion: CameraMotion = serde_json::from_value(json!({"style":"cinematic","shake":true,"intensity":0.0015,"duration":0.12,"frequency":12.,"spring":true,"damping":0.95,"blur":true,"blurIntensity":0.18,"impacts":[1.,2.]})).unwrap();
+        assert!(valid_camera_motion(&motion, 3.)); assert!(!motion.webcam_shake);
+        let saved: CameraMotion = serde_json::from_value(serde_json::to_value(&motion).unwrap()).unwrap();
+        assert_eq!(saved.impacts, vec![1.,2.]); assert_eq!(saved.style,"cinematic");
+        motion.duration = f64::NAN; assert!(!valid_camera_motion(&motion,3.));
+        motion.duration = 0.12; motion.intensity=0.05; assert!(!valid_camera_motion(&motion,3.));
+        motion.intensity=0.0015; motion.impacts=vec![4.]; assert!(!valid_camera_motion(&motion,3.));
+    }
+    #[test]
     fn export_formats_are_bounded() {
+        assert!(valid_webcam_zoom(Some("custom"), Some(0.2), Some(0.4)));
+        assert!(!valid_webcam_zoom(Some("invalid"), Some(0.2), Some(0.4)));
+        assert!(!valid_webcam_zoom(Some("grow"), Some(f64::NAN), Some(0.4)));
+        assert!(!valid_webcam_zoom(Some("keep"), None, Some(0.)));
         for resolution in [480, 720, 1080, 1440, 2160] { for fps in [24, 30, 60] { assert!(super::validate_export_format(resolution, fps).is_ok()); } }
         for (resolution, fps) in [(0, 60), (4320, 60), (2160, 0), (2160, 120)] { assert!(super::validate_export_format(resolution, fps).is_err()); }
     }
@@ -528,7 +573,7 @@ mod tests {
     #[test] fn validates_edit_boundaries() {
         assert!(validate_trim(0., 2., 2.).is_ok());
         for (start, end) in [(1., 0.), (-1., 1.), (0., 3.), (f64::NAN, 1.), (0., 0.01)] { assert!(validate_trim(start, end, 2.).is_err()); }
-        let mut a = Appearance { background: 0, padding: 9., radius: 12., shadow: 35., cursor_size: 24., smooth: true, aspect: "auto".into(), crop_fill: None, crop_follow_cursor: None, camera_mode: None, colors: None, background_mode: None, cursor_smooth: None, wallpaper: None, cursor_asset: None, cursor_theme: None, background_blur: None, cursor_motion: None, camera_spring: None, motion_blur: None, click_sounds: Some(true), click_sound_volume: Some(0.3) };
+        let mut a = Appearance { background: 0, padding: 9., radius: 12., shadow: 35., cursor_size: 24., smooth: true, aspect: "auto".into(), crop_fill: None, crop_follow_cursor: None, camera_mode: None, colors: None, background_mode: None, cursor_smooth: None, wallpaper: None, cursor_asset: None, cursor_theme: None, background_blur: None, cursor_motion: None, camera_spring: None, camera_motion: None, motion_blur: None, click_sounds: Some(true), click_sound_volume: Some(0.3) };
         assert!(validate_appearance(&a).is_ok()); a.padding = f64::INFINITY; assert!(validate_appearance(&a).is_err());
         a.padding = 9.;
         a.camera_mode = Some("hybrid".into()); assert!(validate_appearance(&a).is_ok());
@@ -543,8 +588,8 @@ mod tests {
         let folder = std::env::temp_dir().join(format!("frame-package-test-{}", timestamp().unwrap()));
         std::fs::create_dir(&folder).unwrap();
         let original = folder.join("original.mov"); std::fs::write(&original, b"synthetic-video").unwrap();
-        let media = Media { path: original.to_string_lossy().into_owned(), duration: 3., width: 1280, height: 800, cursor: vec![Pointer { t: 0., x: 0.5, y: 0.5, down: false, kind: None, right_down: Some(true), middle_down: Some(false), typing: None }], cursor_captured: true, webcam_path: None };
-        let mut project = Project { version: 1, name: "Example".into(), media_path: media.path.clone(), zooms: vec![], appearance: Appearance { background: 0, padding: 9., radius: 12., shadow: 35., cursor_size: 24., smooth: true, aspect: "auto".into(), crop_fill: None, crop_follow_cursor: None, camera_mode: None, colors: None, background_mode: None, cursor_smooth: None, wallpaper: None, cursor_asset: None, cursor_theme: None, background_blur: None, cursor_motion: None, camera_spring: None, motion_blur: None, click_sounds: None, click_sound_volume: None }, trim: Trim { start: 0., end: 3. }, clips: None, effects: None, background_audio: None, webcam: None };
+        let media = Media { path: original.to_string_lossy().into_owned(), duration: 3., width: 1280, height: 800, cursor: vec![Pointer { t: 0., x: 0.5, y: 0.5, down: false, kind: None, right_down: Some(true), middle_down: Some(false), typing: None }], cursor_captured: true, has_audio: false, webcam_path: None, microphone_path: None };
+        let mut project = Project { version: 1, name: "Example".into(), media_path: media.path.clone(), zooms: vec![], appearance: Appearance { background: 0, padding: 9., radius: 12., shadow: 35., cursor_size: 24., smooth: true, aspect: "auto".into(), crop_fill: None, crop_follow_cursor: None, camera_mode: None, colors: None, background_mode: None, cursor_smooth: None, wallpaper: None, cursor_asset: None, cursor_theme: None, background_blur: None, cursor_motion: None, camera_spring: None, camera_motion: None, motion_blur: None, click_sounds: None, click_sound_volume: None }, trim: Trim { start: 0., end: 3. }, clips: None, effects: None, background_audio: None, microphone: None, source_volume: None, webcam: None };
         project.clips = Some(vec![Clip { start: 0., end: 0.5, ..Default::default() }, Clip { start: 1., end: 3., ..Default::default() }]);
         let package = folder.join("Example.framestudio");
         create_package(&package, &project, &media).unwrap();
@@ -595,7 +640,7 @@ mod tests {
         let saved = read_document(&moved).unwrap().0;
         assert_eq!(saved.version, 7); assert_eq!(saved.appearance.camera_mode.as_deref(), Some("hybrid")); assert_eq!(saved.appearance.crop_follow_cursor, Some(true));
         let camera = folder.join("webcam.mov"); std::fs::write(&camera, b"synthetic-webcam").unwrap();
-        project.webcam = Some(Webcam { path: camera.to_string_lossy().into_owned(), x: 0.78, y: 0.78, size: 0.24, shape: "circle".into(), keyframes: vec![], mode: None, opacity: None, border: None, shadow: None, border_radius: None, layouts: None });
+        project.webcam = Some(Webcam { zoom_behavior: None, zoom_size: None, transition_duration: None, path: camera.to_string_lossy().into_owned(), x: 0.78, y: 0.78, size: 0.24, shape: "circle".into(), keyframes: vec![], mode: None, opacity: None, border: None, shadow: None, border_radius: None, layouts: None });
         assert!(validate_project(&project, &media).is_ok()); write_manifest(&moved, &project, &source).unwrap();
         let saved = read_document(&moved).unwrap().0; assert_eq!(saved.version, 8);
         let saved_webcam = saved.webcam.unwrap(); assert_eq!(saved_webcam.shape, "circle"); assert!(moved.join(saved_webcam.path).is_file());
@@ -604,11 +649,20 @@ mod tests {
         project.webcam.as_mut().unwrap().border = Some(3.);
         project.webcam.as_mut().unwrap().shadow = Some(40.);
         project.webcam.as_mut().unwrap().keyframes = vec![WebcamKeyframe { t: 0., x: 0.78, y: 0.78, size: 0.24, opacity: Some(0.5), border_radius: Some(0.2), easing: Some("ease-in-out".into()) }, WebcamKeyframe { t: 2., x: 0.22, y: 0.7, size: 0.3, opacity: Some(1.), border_radius: Some(0.5), easing: Some("ease-out".into()) }];
-        project.webcam.as_mut().unwrap().layouts = Some(WebcamLayouts { portrait: Some(WebcamLayout { x: Some(0.5), y: Some(0.7), size: Some(0.32), shape: Some("rounded".into()), opacity: Some(1.), border: Some(3.), shadow: Some(45.), border_radius: Some(0.18), mode: Some("hybrid".into()), keyframes: vec![] }), landscape: None });
+        project.webcam.as_mut().unwrap().layouts = Some(WebcamLayouts { portrait: Some(WebcamLayout { zoom_behavior: Some("shrink".into()), zoom_size: Some(0.16), transition_duration: Some(0.4), x: Some(0.5), y: Some(0.7), size: Some(0.32), shape: Some("rounded".into()), opacity: Some(1.), border: Some(3.), shadow: Some(45.), border_radius: Some(0.18), mode: Some("hybrid".into()), keyframes: vec![] }), landscape: None });
         assert!(validate_project(&project, &media).is_ok()); write_manifest(&moved, &project, &source).unwrap();
         let saved = read_document(&moved).unwrap().0; assert_eq!(saved.version, 11); let saved_camera = saved.webcam.unwrap(); assert_eq!(saved_camera.keyframes.len(), 2); assert_eq!(saved_camera.layouts.unwrap().portrait.unwrap().size, Some(0.32)); assert_eq!(saved_camera.keyframes[1].easing.as_deref(), Some("ease-out"));
+        project.microphone = Some(BackgroundAudio { path: background.to_string_lossy().into_owned(), volume: 0.8 }); project.source_volume = Some(0.7);
+        write_manifest(&moved, &project, &source).unwrap();
+        let recorded = read_document(&moved).unwrap().0;
+        assert_eq!(recorded.source_volume, Some(0.7));
+        let microphone = recorded.microphone.unwrap(); assert_eq!(microphone.volume, 0.8); assert!(microphone.path.starts_with("audio/microphone-")); assert!(moved.join(microphone.path).is_file());
+        let saved_copy = folder.join("Audio Copy.framestudio"); let moved_media = Media { path: source.to_string_lossy().into_owned(), ..media.clone() }; create_package(&saved_copy, &project, &moved_media).unwrap();
+        let copied = read_document(&saved_copy).unwrap().0; assert!(saved_copy.join(copied.microphone.unwrap().path).is_file());
+        let mut invalid_voice = project.clone(); invalid_voice.microphone.as_mut().unwrap().volume = 2.; assert!(validate_project(&invalid_voice, &media).is_err());
         let mut invalid_animation = project.clone(); invalid_animation.webcam.as_mut().unwrap().keyframes[1].t = 0.; assert!(validate_project(&invalid_animation, &media).is_err());
-        let mut invalid_webcam = project.clone(); invalid_webcam.webcam.as_mut().unwrap().x = 0.01;
+        let mut edge_webcam = project.clone(); edge_webcam.webcam.as_mut().unwrap().x = 0.; edge_webcam.webcam.as_mut().unwrap().shape = "rectangle".into(); assert!(validate_project(&edge_webcam, &media).is_ok());
+        let mut invalid_webcam = project.clone(); invalid_webcam.webcam.as_mut().unwrap().x = -0.01;
         assert!(validate_project(&invalid_webcam, &media).is_err());
         let mut invalid_audio = project.clone(); invalid_audio.background_audio.as_mut().unwrap().volume = 1.1;
         assert!(validate_project(&invalid_audio, &media).is_err());

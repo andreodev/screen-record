@@ -18,6 +18,107 @@
     let video;
     for (let i = 0; i < 150; i++) { video = document.querySelector('video'); if (video?.readyState >= 2) break; await wait(200); }
     if (!video || video.readyState < 2) throw new Error('Benchmark video did not load');
+    if(config.mode==='cinematic-check'){
+      const assert=(v,m)=>{if(!v)throw new Error(m);};
+      const field=text=>[...document.querySelectorAll('label')].find(n=>n.textContent.trim().startsWith(text))?.querySelector('input,select');
+      const set=async(node,value)=>{assert(node,'Missing control');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(node,String(value));node.dispatchEvent(new Event('input',{bubbles:true}));await wait(180);};
+      const seek=async t=>{video.pause();await set(document.querySelector('[aria-label="Posição da reprodução"]'),t);await wait(200);};
+      const click=text=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);assert(b,`Missing ${text}`);b.click();};
+      const bounds=()=>{const r=document.querySelector('.webcam-frame').getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height};};
+      document.querySelector('button[aria-label="Animações"]').click();await wait(200);
+      assert(document.querySelector('[aria-label="Motion Style"] button[aria-pressed="true"]').textContent==='Cinematic','Cinematic is not the default');
+      await seek(1);click('Adicionar impacto no marcador');await wait(100);await seek(1.05);
+      const viewport=document.querySelector('.video-viewport'),on=viewport.style.transform,webcam=bounds(),background=getComputedStyle(document.querySelector('.scene')).backgroundImage;
+      const canvas=document.querySelector('.motion-preview'),scene=document.querySelector('.scene');assert(canvas.parentElement===scene,'Blur is still rasterized before the camera zoom');assert(canvas.width>=Math.round(scene.clientWidth*Math.min(devicePixelRatio,2))-1,'Blur canvas has insufficient final resolution');
+      field('Micro-Shake').click();await wait(200);const off=viewport.style.transform;
+      assert(on!==off,'Micro-shake did not move the rendered recording');
+      const still=bounds();assert(Math.abs(webcam.x-still.x)<.02&&Math.abs(webcam.y-still.y)<.02,'Screen shake moved the webcam');
+      assert(background===getComputedStyle(document.querySelector('.scene')).backgroundImage,'Shake changed the background');
+      field('Micro-Shake').click();await wait(150);field('Micro-shake separado na webcam').click();await wait(150);
+      const separate=bounds();assert(Math.abs(separate.x-webcam.x)+Math.abs(separate.y-webcam.y)>.01,'Separate webcam effect did not render');
+      field('Micro-shake separado na webcam').click();await wait(100);
+      click('Smooth');await wait(150);assert(!field('Micro-Shake').checked&&!field('Motion Blur').checked,'Smooth preset retained shake/blur');
+      click('Dynamic');await wait(150);assert(field('Micro-Shake').checked&&field('Motion Blur').checked,'Dynamic preset failed');
+      await set(field('Amortecimento'),110);assert(Number(field('Amortecimento').value)===110,'Damping control failed');
+      click('Desativar Camera Motion');await wait(150);assert(!field('Micro-Shake').checked&&!field('Motion Blur').checked&&!field('Spring').checked,'Off left active effects');assert(document.querySelector('[aria-label="Impactos manuais"] button'),'Off deleted manual impacts');
+      click('Cinematic');await wait(200);video.muted=true;
+      const timestamps=[];let last=performance.now();await video.play();
+      await new Promise(resolve=>{const start=performance.now();function tick(now){timestamps.push(now-last);last=now;if(now-start>=2000)resolve();else requestAnimationFrame(tick);}requestAnimationFrame(tick);});video.pause();
+      const sorted=[...timestamps].sort((a,b)=>a-b);const fps=timestamps.length/(timestamps.reduce((a,b)=>a+b,0)/1000);
+      await invoke('report_preview_benchmark',{report:{phase:'cinematic-check',passed:true,on,off,webcamStable:true,separateWebcamEffect:true,backgroundStable:true,controls:true,fps,frameP95Ms:sorted[Math.floor(sorted.length*.95)]}});
+      shield.remove();return;
+    }
+    if (config.mode === 'webcam-phase2') {
+      const assert = (value,message) => {if(!value)throw new Error(message);};
+      const field = text => [...document.querySelectorAll('label')].find(n=>n.textContent.trim().startsWith(text))?.querySelector('select,input');
+      const set = async (node,value) => {assert(node,'Missing input');Object.getOwnPropertyDescriptor(node.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype,'value').set.call(node,String(value));node.dispatchEvent(new Event(node.tagName==='SELECT'?'change':'input',{bubbles:true}));await wait(180);};
+      const seek = async t => {video.pause();await set(document.querySelector('[aria-label="Posição da reprodução"]'),t);await wait(450);};
+      const width = () => document.querySelector('.webcam-frame').getBoundingClientRect().width;
+      const clickText = text => {const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim().startsWith(text));assert(b,`Missing ${text}`);b.click();};
+      document.querySelector('[aria-label="Webcam"]').click();await wait(300);
+      await seek(0);const overview=width();
+      await set(field('Tamanho durante zoom'),'shrink');await seek(2);const shrink=width();
+      assert(Math.abs(shrink/overview-.65)<.015,'Shrink did not use effective focus');
+      await seek(4);assert(Math.abs(width()-shrink)<1,'Focused camera size pulsed');
+      await set(field('Tamanho durante zoom'),'grow');const grow=width();assert(Math.abs(grow/overview-1.35)<.015,'Grow failed');
+      await set(field('Tamanho durante zoom'),'keep');assert(Math.abs(width()-overview)<1,'Keep failed');
+      await set(field('Tamanho durante zoom'),'custom');await set(field('Tamanho em foco'),18);const custom=width();assert(Math.abs(custom/overview-.5)<.015,'Custom size failed');
+      await seek(2);clickText('◇ Adicionar ajuste');await wait(200);
+      assert(document.querySelectorAll('.webcam-keyframe').length===2,'Independent camera keys were not created');
+      assert(Math.abs(width()-custom)<1,'Creating manual keyframe changed the displayed size');
+      await set(field('Tamanho durante zoom'),'grow');
+      assert(field('Animação').value==='manual','Global setting changed animation mode');
+      assert(document.querySelectorAll('.webcam-keyframe').length===2,'Global setting created an accidental keyframe');
+      assert(Math.abs(width()-custom)<1,'Automation overrode manual keyframe');
+      await set(field('Curva da transição'),'cubic-bezier');
+      clickText('Copiar estado');await seek(3);clickText('Colar estado');await wait(200);
+      assert(document.querySelectorAll('.webcam-keyframe').length===3,'Paste did not create editable state');
+      assert(field('Curva da transição').value==='cubic-bezier','Copy/paste discarded the selected easing');
+      clickText('◆ Ajuste neste momento');await wait(200);assert(document.querySelectorAll('.webcam-keyframe').length===2,'Removing keyframe failed');
+      await seek(0);const duration=field('Duração até o próximo');assert(duration,'Transition duration missing');
+      duration.focus();await set(duration,1.5);duration.blur();await wait(200);
+      await seek(1.5);assert(field('Tempo do keyframe'),'Duration did not retime the next keyframe');
+      await invoke('report_preview_benchmark',{report:{phase:'webcam-phase2',passed:true,overview,shrink,grow,custom,keyframes:document.querySelectorAll('.webcam-keyframe').length,manualPriority:true,copyPasteRemove:true,retimedTo:1.5}});
+      shield.remove();return;
+    }
+    if (config.mode === 'webcam-phase1') {
+      const click = selector => { const node = document.querySelector(selector); if (!node || node.disabled) throw new Error(`Control unavailable: ${selector}`); node.click(); };
+      const near = (a,b) => Math.abs(a-b)<1;
+      const bounds = () => { const r=document.querySelector('.webcam-frame').getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height}; };
+      const gesture = async (node,dx,dy) => {
+        const r=node.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;
+        node.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,clientX:x,clientY:y,pointerId:1}));
+        window.dispatchEvent(new PointerEvent('pointermove',{clientX:x+dx,clientY:y+dy,pointerId:1}));
+        window.dispatchEvent(new PointerEvent('pointerup',{clientX:x+dx,clientY:y+dy,pointerId:1}));
+        await wait(150);
+      };
+      video.pause();video.currentTime=Math.min(6.5,video.duration/2);
+      click('[aria-label="Webcam"]');await wait(200);
+      const camera=document.querySelector('.webcam-visual video');
+      if(!camera)throw new Error('Project must contain a webcam track');
+      for(let i=0;i<100&&camera.readyState<2;i++)await wait(50);
+      camera.currentTime=video.currentTime;await wait(200);
+      const before=bounds();
+      await gesture(document.querySelector('.webcam-frame'),-35,-25);
+      const moved=bounds();
+      if(!near(moved.x,before.x-35)||!near(moved.y,before.y-25))throw new Error('Drag failed to update the visible camera');
+      click('[aria-label="Desfazer"]');await wait(150);
+      if(!near(bounds().x,before.x)||!near(bounds().y,before.y))throw new Error('Drag undo failed');
+      await gesture(document.querySelector('.webcam-resize'),20,20);
+      const resized=bounds();
+      if(resized.width<before.width+10)throw new Error('Resize handle did not grow the camera');
+      click('[aria-label="Desfazer"]');await wait(150);
+      if(!near(bounds().width,before.width))throw new Error('Resize undo failed');
+      click('[aria-label="Superior esquerdo"]');await wait(150);
+      const corner=bounds(),scene=document.querySelector('.scene').getBoundingClientRect(),margin=Math.min(scene.width,scene.height)*.025;
+      if(!near(corner.x,scene.x+margin)||!near(corner.y,scene.y+margin))throw new Error('Corner preset used incorrect margins');
+      click('[aria-label="Desfazer"]');await wait(150);
+      [...document.querySelectorAll('[aria-label="Formato da webcam"] button')].find(b=>b.textContent==='Original').click();await wait(150);
+      const original=bounds();
+      if(Math.abs(original.width/original.height-camera.videoWidth/camera.videoHeight)>.01)throw new Error('Original format distorted the webcam aspect');
+      await invoke('report_preview_benchmark',{report:{phase:'webcam-phase1',passed:true,before,moved,resized,corner,original,sourceAspect:camera.videoWidth/camera.videoHeight}});
+      shield.remove();return;
+    }
     if (config.mode === 'cursor-quality') {
       video.pause(); video.currentTime = 0; await wait(300);
       const cursor = document.querySelector('.rendered-cursor'), image = cursor?.querySelector('img');
