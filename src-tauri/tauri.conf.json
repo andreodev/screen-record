@@ -38,7 +38,6 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "native/FrameNative.app/": "FrameNative.app/",
       "resources/studio-assets/": "studio-assets/"
     },
     "macOS": {

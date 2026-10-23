@@ -15,9 +15,43 @@
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const percentile = (values, p) => [...values].sort((a, b) => a - b)[Math.min(values.length - 1, Math.floor(values.length * p))] || 0;
   try {
+    if (config.mode === 'recording-settings') {
+      const assert = (value, message) => { if (!value) throw new Error(message); };
+      const key = 'frame-studio-recording-options', previous = localStorage.getItem(key);
+      const select = async (label, value) => {
+        const node = document.querySelector(`select[aria-label="${label}"]`);
+        assert(node && !node.matches(':disabled'), `Disabled or missing ${label} before opening a project`);
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(node, value);
+        node.dispatchEvent(new Event('change', {bubbles:true})); await wait(150);
+        return node;
+      };
+      try {
+        const devices = await invoke('list_recording_devices');
+        document.querySelector('button[aria-label="Áudio"]').click(); await wait(400);
+        await select('Tratamento da voz', 'natural');
+        const checkbox = text => [...document.querySelectorAll('label')].find(label => label.textContent.trim().startsWith(text))?.querySelector('input[type="checkbox"]');
+        assert(checkbox('Supressão de ruído')?.checked, 'Noise suppression not enabled in Natural');
+        assert(checkbox('Compressor de voz')?.checked, 'Compressor not enabled in Natural');
+        if (devices.inputs.length) await select('Microfone para gravar', devices.inputs[0].id);
+        if (devices.outputs.length) await select('Saída de áudio a gravar', devices.outputs[0].id);
+        const saved = JSON.parse(localStorage.getItem(key));
+        assert(saved.microphoneProcessing.noiseSuppression && saved.microphoneProcessing.compressor, 'Voice preferences were not saved');
+        assert(!devices.inputs.length || saved.microphoneDevice === devices.inputs[0].id, 'Microphone selection was not saved');
+        assert(!devices.outputs.length || saved.outputDevice === devices.outputs[0].id, 'Output selection was not saved');
+        await select('Tratamento da voz', 'off');
+        assert(!checkbox('Supressão de ruído')?.checked && !checkbox('Compressor de voz')?.checked, 'Voice bypass failed');
+        document.querySelector('button[aria-label="Webcam"]').click(); await wait(200);
+        const camera = await select('Webcam para gravar', devices.cameras[0]?.id || '');
+        assert(camera.options.length >= devices.cameras.length + 1, 'Cameras were not listed');
+        await invoke('report_preview_benchmark', {report:{phase:'recording-settings',passed:true,outputs:devices.outputs.length,inputs:devices.inputs.length,cameras:devices.cameras.length,noiseSuppression:true,compressor:true,persistence:true,noProject:true}});
+      } finally {
+        if (previous === null) localStorage.removeItem(key); else localStorage.setItem(key, previous);
+      }
+      shield.remove(); return;
+    }
     let video;
     for (let i = 0; i < 150; i++) { video = document.querySelector('video'); if (video?.readyState >= 2) break; await wait(200); }
-    if (!video || video.readyState < 2) throw new Error('Benchmark video did not load');
+    if (!video || video.readyState < 2) throw new Error(`Benchmark video did not load: ${JSON.stringify({src:video?.currentSrc,ready:video?.readyState,error:video?.error?.message,ui:document.querySelector('.error-text')?.textContent,body:!video?document.body.innerText.slice(0,1800):undefined})}`);
     if(config.mode==='cinematic-check'){
       const assert=(v,m)=>{if(!v)throw new Error(m);};
       const field=text=>[...document.querySelectorAll('label')].find(n=>n.textContent.trim().startsWith(text))?.querySelector('input,select');
@@ -118,6 +152,16 @@
       if(Math.abs(original.width/original.height-camera.videoWidth/camera.videoHeight)>.01)throw new Error('Original format distorted the webcam aspect');
       await invoke('report_preview_benchmark',{report:{phase:'webcam-phase1',passed:true,before,moved,resized,corner,original,sourceAspect:camera.videoWidth/camera.videoHeight}});
       shield.remove();return;
+    }
+    if (config.mode === 'cursor-visible' || config.checkCursor) {
+      video.pause(); video.currentTime = Math.min(1, video.duration / 2); await wait(400);
+      const cursor = document.querySelector('.rendered-cursor'), image = cursor?.querySelector('img');
+      const state = () => ({src:image?.currentSrc,complete:image?.complete,width:image?.naturalWidth,display:cursor&&getComputedStyle(cursor).display,visibility:cursor&&getComputedStyle(cursor).visibility,bounds:cursor?.getBoundingClientRect().toJSON(),scene:document.querySelector('.scene')?.getBoundingClientRect().toJSON(),ui:document.querySelector('.error-text')?.textContent});
+      if (!cursor || !image) throw new Error(`Cursor missing: ${JSON.stringify(state())}`);
+      try { await image.decode(); } catch(e) { throw new Error(`Cursor asset failed: ${JSON.stringify(state())}: ${e}`); }
+      if (!image.naturalWidth || getComputedStyle(cursor).display==='none') throw new Error(`Cursor invisible: ${JSON.stringify(state())}`);
+      await invoke('report_preview_benchmark', {report:{phase:'cursor-visible',passed:true,...state()}});
+      if (config.mode === 'cursor-visible') { shield.remove(); return; }
     }
     if (config.mode === 'cursor-quality') {
       video.pause(); video.currentTime = 0; await wait(300);

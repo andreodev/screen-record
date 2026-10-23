@@ -3,6 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { assetPath } from "./asset-path";
+import { DeviceSelect } from "./DeviceSelect";
+import { loadRecordingOptions, saveRecordingOptions, microphonePresets, type RecordingDevices, type MicrophoneProcessing } from "./recording-options";
+const windowsDesktop = navigator.userAgent.includes("Windows");
+const undoShortcut = windowsDesktop ? "Ctrl+Z" : "⌘Z";
 import {
   autoZooms,
   backgrounds,
@@ -270,6 +275,10 @@ export default function App() {
   const [recordWebcam, setRecordWebcam] = useState(false);
   const [recordSystemAudio, setRecordSystemAudio] = useState(true);
   const [recordMicrophone, setRecordMicrophone] = useState(true);
+  const [recordingOptions, setRecordingOptions] = useState(loadRecordingOptions);
+  const [recordingDevices, setRecordingDevices] = useState<RecordingDevices>({ supported: false, outputs: [], inputs: [], cameras: [] });
+  const [devicesLoading, setDevicesLoading] = useState(false);
+  const [devicesError, setDevicesError] = useState("");
   const [webcamSourceAspect, setWebcamSourceAspect] = useState(16 / 9);
   const [recordingCameraPosition, setRecordingCameraPosition] = useState({ x: 0.78, y: 0.78 });
   const [cameraPreviewReady, setCameraPreviewReady] = useState(false);
@@ -328,6 +337,23 @@ export default function App() {
   const viewportRef = useRef({ width: 700, height: 400 });
   const desktop = isTauri(),
     busy = operation !== "idle";
+  const microphoneProcessing = recordingOptions.microphoneProcessing;
+  const microphonePreset = Object.keys(microphonePresets).find(key => Object.entries(microphonePresets[key]).every(([field, value]) => microphoneProcessing[field as keyof MicrophoneProcessing] === value)) || "custom";
+  const updateMicrophoneProcessing = (patch: Partial<MicrophoneProcessing>) => setRecordingOptions(options => ({ ...options, microphoneProcessing: { ...options.microphoneProcessing, ...patch } }));
+  useEffect(() => { saveRecordingOptions(recordingOptions); }, [recordingOptions]);
+  const refreshDevices = useCallback(async () => {
+    if (!desktop || !windowsDesktop || busy) return;
+    setDevicesLoading(true); setDevicesError("");
+    try { setRecordingDevices(await invoke<RecordingDevices>("list_recording_devices")); }
+    catch (cause) { setDevicesError(String(cause)); }
+    finally { setDevicesLoading(false); }
+  }, [desktop, busy]);
+  useEffect(() => {
+    void refreshDevices();
+    const refresh = () => { void refreshDevices(); };
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, [refreshDevices]);
   useEffect(() => {
     if (!desktop || !recordWebcam || operation !== "idle") {
       setCameraPreviewReady(false);
@@ -337,7 +363,7 @@ export default function App() {
     setCameraPreviewReady(false);
     setCameraPreviewFrame("");
     setCameraPreviewError("");
-    void invoke("start_camera_preview").catch((cause) => {
+    void invoke("start_camera_preview", { deviceId: recordingOptions.cameraDevice }).catch((cause) => {
       const message = String(cause);
       setCameraPreviewError(message);
       setError(message);
@@ -346,7 +372,7 @@ export default function App() {
       void invoke("stop_camera_preview").catch(() => undefined);
       setCameraPreviewReady(false);
     };
-  }, [desktop, recordWebcam, operation]);
+  }, [desktop, recordWebcam, operation, recordingOptions.cameraDevice]);
   const look = project?.appearance || defaults;
   const ranges = useMemo(
     () => (project ? clipRanges(project.trim, project.clips) : []),
@@ -478,7 +504,7 @@ export default function App() {
     (item) => item.id === look.wallpaper,
   );
   const assetURL = (file: string) =>
-    assetRoot ? convertFileSrc(`${assetRoot}/${file}`) : undefined;
+    assetRoot ? convertFileSrc(assetPath(assetRoot, file)) : undefined;
   useEffect(() => {
     if (desktop)
       void invoke<string>("studio_asset_root")
@@ -824,7 +850,7 @@ export default function App() {
       cursor.current.style.height = `${dimensions.height}px`;
       if (image) {
         const src = renderData.current.assetRoot
-          ? convertFileSrc(`${renderData.current.assetRoot}/${entry.file}`)
+          ? convertFileSrc(assetPath(renderData.current.assetRoot, entry.file))
           : "";
         if (image.getAttribute("src") !== src) image.setAttribute("src", src);
         image.style.transform = `translate(${-entry.hotspotX * 100}%,${-entry.hotspotY * 100}%)`;
@@ -1153,7 +1179,7 @@ export default function App() {
     if (selected) {
       edit((p) => ({ ...p, zooms: p.zooms.filter((z) => z.id !== selected) }));
       setSelected(null);
-      setNotice("Zoom removido. ⌘Z desfaz.");
+      setNotice(`Zoom removido. ${undoShortcut} desfaz.`);
       return;
     }
     if (selectedEffect) {
@@ -1165,12 +1191,12 @@ export default function App() {
         ),
       }));
       setSelectedEffect(null);
-      setNotice("Máscara ou destaque removido. ⌘Z desfaz.");
+      setNotice(`Máscara ou destaque removido. ${undoShortcut} desfaz.`);
       return;
     }
     if (webcamKeyed) {
       toggleWebcamKeyframe();
-      setNotice("Ajuste da webcam removido. ⌘Z desfaz.");
+      setNotice(`Ajuste da webcam removido. ${undoShortcut} desfaz.`);
       return;
     }
     if (selectedClip === null) return;
@@ -1193,7 +1219,7 @@ export default function App() {
     if (video.current) video.current.currentTime = next;
     setTime(next);
     draw(next);
-    setNotice("Trecho apagado da edição. ⌘Z desfaz.");
+    setNotice(`Trecho apagado da edição. ${undoShortcut} desfaz.`);
   }, [selected, selectedClip, selectedEffect, webcamKeyed, edit, draw]);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1348,11 +1374,11 @@ export default function App() {
     await invoke("stop_camera_preview").catch(() => undefined);
     setOperation("starting");
     setNotice(
-      recordMicrophone ? "Iniciando tela e áudio. Autorize o microfone se o macOS solicitar." : recordWebcam
+      recordMicrophone ? "Iniciando tela e áudio. Autorize o microfone se solicitado." : recordWebcam
         ? "Aguardando a tela e a webcam. Autorize o acesso à câmera se solicitado."
-        : "Aguardando os primeiros frames. Se solicitado, autorize a gravação de tela no macOS.",
+        : "Aguardando os primeiros frames da tela.",
     );
-    await action("start_recording", { withWebcam: recordWebcam, withSystemAudio: recordSystemAudio, withMicrophone: recordMicrophone });
+    await action("start_recording", { withWebcam: recordWebcam, withSystemAudio: recordSystemAudio, withMicrophone: recordMicrophone, options: windowsDesktop ? recordingOptions : undefined });
   }
   function recordingCameraPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (operation !== "recording") return;
@@ -2015,17 +2041,17 @@ export default function App() {
           {project?.name || "Novo projeto"}
           <small>
             {projectPath
-              ? ".framestudio · salvo no Mac"
+              ? ".framestudio · salvo neste computador"
               : project
                 ? "· ainda não salvo"
-                : "Local · macOS"}
+                : `Local · ${windowsDesktop ? "Windows" : "macOS"}`}
           </small>
         </span>
         <div className="header-actions">
           <button
             disabled={!past.length || busy}
             onClick={undo}
-            title="Desfazer ⌘Z"
+            title={`Desfazer ${undoShortcut}`}
             aria-label="Desfazer"
           >
             ↶
@@ -2033,7 +2059,7 @@ export default function App() {
           <button
             disabled={!future.length || busy}
             onClick={redo}
-            title="Refazer ⇧⌘Z"
+            title={`Refazer ${windowsDesktop ? "Ctrl+Shift+Z" : "⇧⌘Z"}`}
             aria-label="Refazer"
           >
             ↷
@@ -2661,7 +2687,7 @@ export default function App() {
                 </strong>
                 <span className="record-clock">{clock(elapsed)}</span>
                 <p>
-                  Até 4K · 60 fps · resolução da tela preservada · sem áudio.
+                  Até 4K · 60 fps · {recordSystemAudio || recordMicrophone ? "com áudio" : "sem áudio"}.
                 </p>
                 <button
                   className="light-button"
@@ -2679,7 +2705,7 @@ export default function App() {
                   <i className={`camera-preview-dot${cameraPreviewReady ? " ready" : ""}`} />
                   {cameraPreviewError ? "Câmera bloqueada" : cameraPreviewReady ? "Webcam pronta" : "Aguardando acesso à câmera…"}
                 </span>
-                {cameraPreviewError && <><p className="camera-preview-error">{cameraPreviewError}</p><button className="camera-preview-settings" onClick={() => void invoke("open_camera_settings")}>Abrir permissão da câmera ↗</button><button className="camera-preview-settings" onClick={() => { setCameraPreviewError(""); void invoke("start_camera_preview").catch((cause) => setCameraPreviewError(String(cause))); }}>Tentar novamente</button></>}
+                {cameraPreviewError && <><p className="camera-preview-error">{cameraPreviewError}</p><button className="camera-preview-settings" onClick={() => void invoke("open_camera_settings")}>Abrir permissão da câmera ↗</button><button className="camera-preview-settings" onClick={() => { setCameraPreviewError(""); void invoke("start_camera_preview", { deviceId: recordingOptions.cameraDevice }).catch((cause) => setCameraPreviewError(String(cause))); }}>Tentar novamente</button></>}
               </aside>
             )}
           </div>
@@ -2756,7 +2782,7 @@ export default function App() {
           ))}
         </nav>
         <aside className="inspector" ref={inspector}>
-          <fieldset disabled={!project || busy}>
+          <fieldset disabled={busy || (!project && panel !== "audio" && panel !== "webcam")}>
             {panel === "background" && (
               <>
                 <div className="panel-title">
@@ -3440,6 +3466,11 @@ export default function App() {
                   <h2>Webcam</h2>
                   <span>Sobreposição na gravação</span>
                 </div>
+                {windowsDesktop && <>
+                  <DeviceSelect label="Webcam para gravar" value={recordingOptions.cameraDevice} devices={recordingDevices.cameras} disabled={busy || devicesLoading} onChange={cameraDevice => setRecordingOptions(options => ({ ...options, cameraDevice }))} />
+                  <button className="wide subtle" disabled={busy || devicesLoading} onClick={() => void refreshDevices()}>{devicesLoading ? "Buscando dispositivos…" : "Atualizar dispositivos"}</button>
+                  {devicesError && <p className="help capture-device-error" role="alert">{devicesError}</p>}
+                </>}
                 {project?.webcam ? (
                   <>
                     <p className="help">
@@ -3540,7 +3571,7 @@ export default function App() {
                       />
                     </label>
                     <p className="help">
-                      A câmera padrão do Mac será gravada em uma faixa separada
+                      A câmera selecionada será gravada em uma faixa separada
                       para você ajustar o formato e a posição depois.
                     </p>
                   </>
@@ -3554,9 +3585,35 @@ export default function App() {
                   <span>Trilha e efeitos sonoros</span>
                 </div>
                 <h3>Próxima gravação</h3>
-                <label className="switch-label">Microfone padrão<input type="checkbox" disabled={busy} checked={recordMicrophone} onChange={(e) => setRecordMicrophone(e.target.checked)} /></label>
+                <label className="switch-label">Gravar microfone<input type="checkbox" disabled={busy} checked={recordMicrophone} onChange={(e) => setRecordMicrophone(e.target.checked)} /></label>
+                {windowsDesktop && <DeviceSelect label="Microfone para gravar" value={recordingOptions.microphoneDevice} devices={recordingDevices.inputs} disabled={busy || devicesLoading || !recordMicrophone} onChange={microphoneDevice => setRecordingOptions(options => ({ ...options, microphoneDevice }))} />}
                 <label className="switch-label">Áudio do sistema<input type="checkbox" disabled={busy} checked={recordSystemAudio} onChange={(e) => setRecordSystemAudio(e.target.checked)} /></label>
-                <p className="help">A voz fica em uma trilha independente. O macOS pode pedir autorização ao iniciar a primeira gravação.</p>
+                {windowsDesktop && <>
+                  <DeviceSelect label="Saída de áudio a gravar" value={recordingOptions.outputDevice} devices={recordingDevices.outputs} disabled={busy || devicesLoading || !recordSystemAudio} onChange={outputDevice => setRecordingOptions(options => ({ ...options, outputDevice }))} />
+                  <p className="help">Escolha os fones ou alto-falantes onde o áudio que você quer gravar está sendo reproduzido.</p>
+                  <button className="wide subtle" disabled={busy || devicesLoading} onClick={() => void refreshDevices()}>{devicesLoading ? "Buscando dispositivos…" : "Atualizar dispositivos"}</button>
+                  {devicesError && <p className="help capture-device-error" role="alert">{devicesError}</p>}
+                  <div className="section-line" />
+                  <h3>Voz limpa na gravação</h3>
+                  <fieldset disabled={busy || !recordMicrophone} className="microphone-processing">
+                    <label className="capture-device-select"><span>Tratamento da voz</span><select aria-label="Tratamento da voz" value={microphonePreset} onChange={event => setRecordingOptions(options => ({ ...options, microphoneProcessing: { ...microphonePresets[event.target.value] } }))}>
+                      <option value="natural">Natural · recomendado</option><option value="noisy">Ambiente ruidoso</option><option value="off">Sem processamento</option><option value="custom" disabled>Personalizado</option>
+                    </select></label>
+                    <label className="switch-label">Supressão de ruído<input type="checkbox" checked={microphoneProcessing.noiseSuppression} onChange={event => updateMicrophoneProcessing({ noiseSuppression: event.target.checked })} /></label>
+                    {microphoneProcessing.noiseSuppression && <Range label="Redução de ruído" min={6} max={30} suffix=" dB" value={microphoneProcessing.noiseReduction} onChange={noiseReduction => updateMicrophoneProcessing({ noiseReduction })} />}
+                    <label className="switch-label">Compressor de voz<input type="checkbox" checked={microphoneProcessing.compressor} onChange={event => updateMicrophoneProcessing({ compressor: event.target.checked })} /></label>
+                    <details className="microphone-advanced"><summary>Ajustes avançados</summary>
+                      <label className="switch-label">Cortar ruídos graves (80 Hz)<input type="checkbox" checked={microphoneProcessing.highPass} onChange={event => updateMicrophoneProcessing({ highPass: event.target.checked })} /></label>
+                      <fieldset disabled={!microphoneProcessing.compressor}>
+                        <Range label="Limiar do compressor" min={-36} max={-6} suffix=" dB" value={microphoneProcessing.thresholdDb} onChange={thresholdDb => updateMicrophoneProcessing({ thresholdDb })} />
+                        <Range label="Razão do compressor" min={1} max={8} step={0.5} suffix=":1" value={microphoneProcessing.ratio} onChange={ratio => updateMicrophoneProcessing({ ratio })} />
+                        <Range label="Ganho da voz" min={0} max={12} suffix=" dB" value={microphoneProcessing.makeupDb} onChange={makeupDb => updateMicrophoneProcessing({ makeupDb })} />
+                      </fieldset>
+                    </details>
+                    <p className="help">A supressão reduz o ruído de fundo e o compressor equilibra o volume da voz. O tratamento é aplicado enquanto você grava e fica salvo na trilha do microfone.</p>
+                  </fieldset>
+                </>}
+                <p className="help">A voz fica em uma trilha independente. Autorize o acesso ao microfone se solicitado pelo sistema.</p>
                 <button className="wide subtle" onClick={() => void action("open_microphone_settings")}>Permissão do microfone ↗</button>
                 {project && media?.hasAudio && <Range label="Volume da gravação / sistema" min={0} max={100} suffix="%" value={(project.sourceVolume ?? 1) * 100} onChange={(v) => edit(p => ({...p, sourceVolume: v / 100}))} />}
                 {project?.microphone && <Range label="Volume do microfone" min={0} max={100} suffix="%" value={project.microphone.volume * 100} onChange={(v) => edit(p => ({...p, microphone: p.microphone ? {...p.microphone, volume:v / 100} : undefined}))} />}
@@ -3898,7 +3955,7 @@ export default function App() {
             <button
               disabled={!project || busy}
               onClick={splitAtPlayhead}
-              title="Dividir no marcador ⌘B"
+              title={`Dividir no marcador ${windowsDesktop ? "Ctrl+B" : "⌘B"}`}
             >
               ✂ Dividir
             </button>
@@ -4154,7 +4211,7 @@ export default function App() {
             onClick={() => void action("reveal_clip")}
             disabled={!desktop || busy || !media}
           >
-            Mostrar no Finder ↗
+            Mostrar no {windowsDesktop ? "Explorer" : "Finder"} ↗
           </button>
         )}
       </footer>

@@ -23,6 +23,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-dialog = "2"
 
+[target.'cfg(windows)'.dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+tiny-skia = "0.12"
+base64 = "0.22"
+windows = { version = "0.62", features = ["Win32_Media_Audio", "Win32_System_Com", "Win32_System_Performance", "Win32_Devices_FunctionDiscovery", "Win32_System_Com_StructuredStorage", "Win32_UI_Shell_PropertiesSystem", "Win32_System_Variant"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_HiDpi"] }
+
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
@@ -31,3 +38,17 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+# Keep the CPU compositor usable in development builds as well.
+[profile.dev.package.screen-studio]
+opt-level = 2
+[profile.dev.package.tiny-skia]
+opt-level = 3
+[profile.dev.package.tiny-skia-path]
+opt-level = 3
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.moxcms]
+opt-level = 3
+[profile.dev.package.pxfm]
+opt-level = 3

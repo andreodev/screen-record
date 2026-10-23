@@ -1,6 +1,9 @@
 mod capture;
 mod benchmark;
 mod studio;
+mod recording;
+#[cfg(windows)]
+pub mod windows_media;
 
 use std::path::PathBuf;
 use std::sync::{atomic::AtomicBool, Mutex};
@@ -13,6 +16,7 @@ pub(crate) struct Recorder {
     media: Mutex<Option<studio::Media>>,
     control: Mutex<Option<std::process::ChildStdin>>,
     camera_preview_control: Mutex<Option<std::process::ChildStdin>>,
+    camera_preview_running: AtomicBool,
     project_path: Mutex<Option<PathBuf>>,
     pending_project: Mutex<Option<PathBuf>>,
 }
@@ -21,8 +25,12 @@ pub fn run() {
     tauri::Builder::default()
         .manage(Recorder::default())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![studio::import_video, studio::choose_background_audio, studio::open_project, studio::save_project, studio::autosave_project, studio::take_pending_project, studio::start_camera_preview, studio::stop_camera_preview, studio::open_camera_settings, studio::open_microphone_settings, studio::start_recording, studio::stop_operation, studio::export_video, studio::reveal_clip, studio::studio_asset_root, studio::open_screen_recording_settings, benchmark::benchmark_config, benchmark::report_preview_benchmark])
+        .invoke_handler(tauri::generate_handler![studio::list_recording_devices, studio::import_video, studio::choose_background_audio, studio::open_project, studio::save_project, studio::autosave_project, studio::take_pending_project, studio::start_camera_preview, studio::stop_camera_preview, studio::open_camera_settings, studio::open_microphone_settings, studio::start_recording, studio::stop_operation, studio::export_video, studio::reveal_clip, studio::studio_asset_root, studio::open_screen_recording_settings, benchmark::benchmark_config, benchmark::report_preview_benchmark])
         .setup(|app| {
+            #[cfg(windows)]
+            if let Some(path) = std::env::args_os().skip(1).map(PathBuf::from).find(|p| p.extension().is_some_and(|ext| ext == "framestudio" || ext == "json") && p.exists()) {
+                *app.state::<Recorder>().pending_project.lock().unwrap_or_else(|e| e.into_inner()) = Some(path);
+            }
             if let Some(config) = benchmark::config()? {
                 if let Some(project) = config["project"].as_str() { *app.state::<Recorder>().pending_project.lock().unwrap_or_else(|e| e.into_inner()) = Some(PathBuf::from(project));
                     if let Some(window) = app.get_webview_window("main") {
@@ -50,6 +58,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("Falha ao iniciar o aplicativo")
         .run(|app, event| {
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = event {
                 use tauri::Emitter;

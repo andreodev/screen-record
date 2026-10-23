@@ -72,12 +72,27 @@ fn validate_export_format(resolution: u32, fps: u32) -> Result<(), String> {
 }
 
 fn helper(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    { let _ = app; return std::env::current_exe().map_err(|e| e.to_string()); }
+    #[cfg(not(windows))]
+    {
     if !cfg!(target_os = "macos") { return Err("O motor nativo está disponível no macOS.".into()); }
     let bundled = app.path().resource_dir().map_err(|e| e.to_string())?.join("FrameNative.app/Contents/MacOS/frame-native");
     if bundled.is_file() { return Ok(bundled); }
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, target_os = "macos"))]
     { let development = PathBuf::from(env!("FRAME_NATIVE_HELPER")); if development.is_file() { return Ok(development); } }
     Err("Motor nativo não encontrado. Recompile o aplicativo.".into())
+    }
+}
+fn helper_command(app: &tauri::AppHandle) -> Result<Command, String> {
+    let mut command = Command::new(helper(app)?);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.arg("--media-helper").creation_flags(0x08000000);
+        command.env("FRAME_RESOURCES", app.path().resource_dir().map_err(|e| e.to_string())?);
+    }
+    Ok(command)
 }
 fn asset_catalog() -> Value { serde_json::from_str(include_str!("../resources/studio-assets/catalog.json")).expect("Bundled asset catalog is valid") }
 fn asset_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -94,7 +109,7 @@ pub(crate) fn studio_asset_root(app: tauri::AppHandle) -> Result<String, String>
     Ok(root.to_string_lossy().into_owned())
 }
 fn run(app: &tauri::AppHandle, args: &[&str]) -> Result<Value, String> {
-    let output = Command::new(helper(app)?).args(args).stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
+    let output = helper_command(app)?.args(args).stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
     let value: Value = std::str::from_utf8(&output.stdout).map_err(|e| e.to_string())?.lines().last().ok_or("Motor nativo não respondeu.").and_then(|line| serde_json::from_str(line).map_err(|_| "Resposta inválida do motor nativo."))?;
     if !output.status.success() { return Err(value["message"].as_str().unwrap_or("Falha no motor nativo.").into()); }
     Ok(value)
@@ -112,12 +127,23 @@ fn choose(app: &tauri::AppHandle, kind: &str) -> Result<Option<PathBuf>, String>
     let chosen = match kind {
         "choose-video" => file.add_filter("Vídeos", &["mov", "mp4", "m4v"]).blocking_pick_file(),
         "choose-audio" => file.add_filter("Áudio", &["mp3", "m4a", "aac", "wav", "aiff"]).blocking_pick_file(),
-        "choose-project" => file.add_filter("Frame Studio", &["framestudio", "json"]).blocking_pick_file(),
+        "choose-project" => {
+            #[cfg(windows)]
+            { file.set_title("Abra project.json dentro da pasta .framestudio").add_filter("Frame Studio (project.json)", &["json"]).blocking_pick_file() }
+            #[cfg(not(windows))]
+            { file.add_filter("Frame Studio", &["framestudio", "json"]).blocking_pick_file() }
+        },
         "save-project" => file.add_filter("Frame Studio Project", &["framestudio"]).set_file_name("Meu projeto.framestudio").blocking_save_file(),
         "save-video" => file.add_filter("MP4", &["mp4"]).set_file_name("Meu vídeo.mp4").blocking_save_file(),
         _ => return Err("Diálogo inválido.".into()),
     };
-    chosen.map(|path| path.into_path().map_err(|e| e.to_string())).transpose()
+    let path = chosen.map(|path| path.into_path().map_err(|e| e.to_string())).transpose()?;
+    Ok(path.map(|path| {
+        if kind == "choose-project" && path.file_name().is_some_and(|name| name == "project.json") {
+            if let Some(parent) = path.parent().filter(|p| p.extension().is_some_and(|ext| ext == "framestudio")) { return parent.to_path_buf(); }
+        }
+        path
+    }))
 }
 #[tauri::command]
 pub(crate) async fn choose_background_audio(app: tauri::AppHandle) -> Result<Option<String>, String> {
@@ -305,12 +331,12 @@ fn write_manifest(package: &Path, project: &Project, source: &Path) -> Result<()
     let package = package.canonicalize().map_err(|e| e.to_string())?;
     let source = source.canonicalize().map_err(|e| e.to_string())?;
     let relative = source.strip_prefix(&package).map_err(|_| "A mídia deve estar dentro do pacote.")?;
-    let mut document = project.clone(); document.version = if document.microphone.is_some() || document.source_volume.is_some() { 11 } else if document.webcam.as_ref().is_some_and(|camera| !camera.keyframes.is_empty() || camera.layouts.is_some() || camera.mode.is_some()) { 11 } else if document.appearance.click_sounds.is_some() || document.appearance.click_sound_volume.is_some() { 9 } else if document.webcam.is_some() { 8 } else if document.appearance.camera_mode.is_some() || document.appearance.crop_follow_cursor == Some(true) { 7 } else if document.background_audio.is_some() { 6 } else if document.effects.as_ref().is_some_and(|effects| !effects.is_empty()) { 5 } else if document.appearance.motion_blur.is_some() || document.zooms.iter().any(|z| z.instant) || document.clips.as_ref().is_some_and(|clips| clips.iter().any(|c| c.speed.is_some() || c.hide_cursor.is_some() || c.cursor_original.is_some())) { 4 } else if document.clips.is_some() { 3 } else { 2 }; document.media_path = relative.to_string_lossy().into_owned();
+    let mut document = project.clone(); document.version = if document.microphone.is_some() || document.source_volume.is_some() { 11 } else if document.webcam.as_ref().is_some_and(|camera| !camera.keyframes.is_empty() || camera.layouts.is_some() || camera.mode.is_some()) { 11 } else if document.appearance.click_sounds.is_some() || document.appearance.click_sound_volume.is_some() { 9 } else if document.webcam.is_some() { 8 } else if document.appearance.camera_mode.is_some() || document.appearance.crop_follow_cursor == Some(true) { 7 } else if document.background_audio.is_some() { 6 } else if document.effects.as_ref().is_some_and(|effects| !effects.is_empty()) { 5 } else if document.appearance.motion_blur.is_some() || document.zooms.iter().any(|z| z.instant) || document.clips.as_ref().is_some_and(|clips| clips.iter().any(|c| c.speed.is_some() || c.hide_cursor.is_some() || c.cursor_original.is_some())) { 4 } else if document.clips.is_some() { 3 } else { 2 }; document.media_path = relative.components().map(|part| part.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
     for (kind, audio) in [("background", &mut document.background_audio), ("microphone", &mut document.microphone)] {
         let Some(audio) = audio else { continue };
         let source = Path::new(&audio.path).canonicalize().map_err(|e| format!("Trilha de áudio não encontrada: {e}"))?;
         let extension = source.extension().and_then(|e| e.to_str()).unwrap_or("m4a");
-        if let Ok(relative) = source.strip_prefix(&package) { audio.path = relative.to_string_lossy().into_owned(); }
+        if let Ok(relative) = source.strip_prefix(&package) { audio.path = relative.components().map(|part| part.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"); }
         else {
             let mut hasher = std::collections::hash_map::DefaultHasher::new(); source.hash(&mut hasher);
             let relative = format!("audio/{kind}-{:016x}.{extension}", hasher.finish());
@@ -322,7 +348,7 @@ fn write_manifest(package: &Path, project: &Project, source: &Path) -> Result<()
     }
     if let Some(camera) = &mut document.webcam {
         let source = Path::new(&camera.path).canonicalize().map_err(|e| format!("Gravação da webcam não encontrada: {e}"))?;
-        if let Ok(relative) = source.strip_prefix(&package) { camera.path = relative.to_string_lossy().into_owned(); }
+        if let Ok(relative) = source.strip_prefix(&package) { camera.path = relative.components().map(|part| part.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"); }
         else { let mut hasher = std::collections::hash_map::DefaultHasher::new(); source.hash(&mut hasher); let relative = format!("media/webcam-{:016x}.mov", hasher.finish()); let destination = package.join(&relative); if source != destination { let source_meta = std::fs::metadata(&source).map_err(|e| e.to_string())?; let stale = std::fs::metadata(&destination).map_or(true, |meta| meta.len() != source_meta.len() || meta.modified().ok() != source_meta.modified().ok()); if stale { std::fs::copy(&source, &destination).map_err(|e| format!("Não foi possível incluir a gravação da webcam: {e}"))?; } } camera.path = relative; }
     }
     let manifest = package.join("project.json");
@@ -390,12 +416,27 @@ pub(crate) async fn autosave_project(app: tauri::AppHandle, project: Project) ->
 }
 fn timestamp() -> Result<u128, String> { Ok(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_nanos()) }
 #[tauri::command]
-pub(crate) fn start_camera_preview(app: tauri::AppHandle) -> Result<(), String> {
-    if !cfg!(target_os = "macos") { return Err("A prévia da webcam está disponível no macOS.".into()); }
+pub(crate) async fn list_recording_devices(app: tauri::AppHandle) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(windows)]
+        { run(&app, &["devices"]) }
+        #[cfg(not(windows))]
+        { let _ = app; Ok(json!({"supported":false,"inputs":[],"outputs":[],"cameras":[]})) }
+    }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub(crate) fn start_camera_preview(app: tauri::AppHandle, device_id: Option<String>) -> Result<(), String> {
     let state = app.state::<Recorder>();
     let mut control = state.camera_preview_control.lock().map_err(|e| e.to_string())?;
     if control.is_some() { return Ok(()); }
-    let mut child = Command::new(helper(&app)?).arg("camera-preview").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|e| e.to_string())?;
+    let mut command = helper_command(&app)?;
+    command.arg("camera-preview");
+    #[cfg(windows)]
+    if let Some(device) = device_id.as_deref().filter(|d| !d.is_empty()) { command.arg(device); }
+    #[cfg(not(windows))]
+    let _ = device_id;
+    let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|e| e.to_string())?;
+    state.camera_preview_running.store(true, Ordering::SeqCst);
     *control = child.stdin.take();
     drop(control);
     let stdout = child.stdout.take().ok_or("Não foi possível ler a prévia da câmera.")?;
@@ -411,19 +452,26 @@ pub(crate) fn start_camera_preview(app: tauri::AppHandle) -> Result<(), String> 
         }
         let _ = child.wait();
         if let Ok(mut control) = app.state::<Recorder>().camera_preview_control.lock() { control.take(); }
+        app.state::<Recorder>().camera_preview_running.store(false, Ordering::SeqCst);
     });
     Ok(())
 }
 #[tauri::command]
 pub(crate) fn stop_camera_preview(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(mut pipe) = app.state::<Recorder>().camera_preview_control.lock().map_err(|e| e.to_string())?.take() { pipe.write_all(b"stop\n").map_err(|e| e.to_string())?; }
+    for _ in 0..300 {
+        if !app.state::<Recorder>().camera_preview_running.load(Ordering::SeqCst) { return Ok(()); }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    if app.state::<Recorder>().camera_preview_running.load(Ordering::SeqCst) { return Err("A câmera ainda está sendo liberada. Tente novamente em um instante.".into()); }
     Ok(())
 }
 fn acquire(app: &tauri::AppHandle) -> Result<(), String> { if app.state::<Recorder>().busy.swap(true, Ordering::SeqCst) { Err("Já existe uma operação em andamento.".into()) } else { Ok(()) } }
-fn spawn_operation(app: tauri::AppHandle, kind: &'static str, arg: PathBuf, cleanup: bool, webcam: Option<PathBuf>, capture_audio: (bool, bool)) {
+fn spawn_operation(app: tauri::AppHandle, kind: &'static str, arg: PathBuf, cleanup: bool, webcam: Option<PathBuf>, capture_audio: (bool, bool), options: Option<crate::recording::RecordingOptions>) {
     std::thread::spawn(move || {
         let result = (|| -> Result<(&str, Value), String> {
-            let mut command = Command::new(helper(&app)?); command.arg(kind).arg(&arg); if let Some(path) = &webcam { command.arg(path); }
+            let mut command = helper_command(&app)?; command.arg(kind).arg(&arg); if let Some(path) = &webcam { command.arg(path); }
+            if let Some(options) = options { command.env("FRAME_CAPTURE_OPTIONS", serde_json::to_string(&options).map_err(|e| e.to_string())?); }
             if capture_audio.0 { command.arg("--system-audio"); } if capture_audio.1 { command.arg("--microphone"); }
             let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn().map_err(|e| e.to_string())?;
             *app.state::<Recorder>().control.lock().map_err(|e| e.to_string())? = child.stdin.take();
@@ -472,14 +520,20 @@ fn spawn_operation(app: tauri::AppHandle, kind: &'static str, arg: PathBuf, clea
 }
 #[tauri::command]
 pub(crate) fn open_microphone_settings() -> Result<(), String> {
+    #[cfg(windows)]
+    { Command::new("explorer.exe").arg("ms-settings:privacy-microphone").spawn().map_err(|e| e.to_string())?; return Ok(()); }
+    #[cfg(not(windows))]
+    {
     Command::new("open").arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone").spawn().map_err(|e| e.to_string())?; Ok(())
+    }
 }
 #[tauri::command]
-pub(crate) fn start_recording(app: tauri::AppHandle, with_webcam: bool, with_system_audio: bool, with_microphone: bool) -> Result<(), String> {
+pub(crate) fn start_recording(app: tauri::AppHandle, with_webcam: bool, with_system_audio: bool, with_microphone: bool, options: Option<crate::recording::RecordingOptions>) -> Result<(), String> {
+    let options = options.unwrap_or_default(); options.validate()?;
     stop_camera_preview(app.clone())?;
     acquire(&app)?;
     let result = (|| { helper(&app)?; let package = app.path().home_dir().map_err(|e| e.to_string())?.join("Frame Studio Projects").join(format!("Gravação-{}.framestudio", timestamp()?)); let folder = package.join("media"); std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?; Ok::<_, String>((folder.join("recording.mov"), with_webcam.then(|| folder.join("webcam.mov")))) })();
-    match result { Ok((path, webcam)) => { spawn_operation(app, "record", path, false, webcam, (with_system_audio, with_microphone)); Ok(()) }, Err(error) => { app.state::<Recorder>().busy.store(false, Ordering::SeqCst); Err(error) } }
+    match result { Ok((path, webcam)) => { spawn_operation(app, "record", path, false, webcam, (with_system_audio, with_microphone), Some(options)); Ok(()) }, Err(error) => { app.state::<Recorder>().busy.store(false, Ordering::SeqCst); Err(error) } }
 }
 #[tauri::command]
 pub(crate) fn stop_operation(app: tauri::AppHandle) -> Result<(), String> {
@@ -514,20 +568,30 @@ pub(crate) async fn export_video(app: tauri::AppHandle, settings: ExportSettings
             std::fs::write(&path, serde_json::to_vec(&job).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
             Ok::<_, String>(path)
         })();
-        match result { Ok(path) => { spawn_operation(app, "export", path, true, None, (false, false)); Ok(true) }, Err(error) => { app.state::<Recorder>().busy.store(false, Ordering::SeqCst); Err(error) } }
+        match result { Ok(path) => { spawn_operation(app, "export", path, true, None, (false, false), None); Ok(true) }, Err(error) => { app.state::<Recorder>().busy.store(false, Ordering::SeqCst); Err(error) } }
     }).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
 pub(crate) fn open_screen_recording_settings() -> Result<(), String> {
+    #[cfg(windows)]
+    { Command::new("explorer.exe").arg("ms-settings:privacy-screenshots").spawn().map_err(|e| e.to_string())?; return Ok(()); }
+    #[cfg(not(windows))]
+    {
     if !cfg!(target_os = "macos") { return Err("Disponível apenas no macOS.".into()); }
     let status = Command::new("/usr/bin/open").arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture").status().map_err(|e| e.to_string())?;
     if status.success() { Ok(()) } else { Err("Não foi possível abrir os Ajustes do Sistema.".into()) }
+    }
 }
 #[tauri::command]
 pub(crate) fn open_camera_settings() -> Result<(), String> {
+    #[cfg(windows)]
+    { Command::new("explorer.exe").arg("ms-settings:privacy-webcam").spawn().map_err(|e| e.to_string())?; return Ok(()); }
+    #[cfg(not(windows))]
+    {
     if !cfg!(target_os = "macos") { return Err("Disponível apenas no macOS.".into()); }
     let status = Command::new("/usr/bin/open").arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Camera").status().map_err(|e| e.to_string())?;
     if status.success() { Ok(()) } else { Err("Não foi possível abrir os Ajustes da Câmera.".into()) }
+    }
 }
 #[tauri::command]
 pub(crate) fn reveal_clip(state: tauri::State<Recorder>) -> Result<(), String> {

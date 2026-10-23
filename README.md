@@ -1,6 +1,6 @@
 # Frame Studio
 
-Editor e gravador desktop local com Tauri 2, React/TypeScript, Rust e um motor Swift para mídia no macOS.
+Editor e gravador desktop local com Tauri 2, React/TypeScript e Rust. Usa Swift/AVFoundation/ScreenCaptureKit no macOS e FFmpeg/WASAPI no Windows.
 
 ## Executar
 
@@ -21,7 +21,50 @@ open "src-tauri/target/debug/bundle/macos/Frame Studio.app"
 
 Novas gravações criam projetos em `~/Frame Studio Projects/`. A mídia é gravada diretamente dentro do pacote, sem segunda cópia.
 
-O build compila `src-tauri/native/FrameNative.swift` para a arquitetura alvo e inclui o executável no bundle. A versão para Windows ainda não tem motor de mídia.
+No macOS, o build compila `src-tauri/native/FrameNative.swift` para a arquitetura alvo e inclui o executável no bundle.
+
+## Executar no Windows
+
+Requer Node, pnpm, Rust (toolchain MSVC), Visual Studio Build Tools 2022 com a carga **Desenvolvimento para desktop com C++** e Windows SDK, e Microsoft Edge WebView2 Runtime. Reabra o terminal após instalar o Rust para atualizar o PATH.
+
+```powershell
+pnpm install --frozen-lockfile
+powershell -ExecutionPolicy Bypass -File scripts/setup-windows.ps1
+pnpm tauri dev
+```
+
+Para gerar um executável local sem instalador:
+
+```powershell
+pnpm tauri build --debug --no-bundle
+.\src-tauri\target\debug\screen-studio.exe
+```
+
+O script prepara FFmpeg/FFprobe e a licença em `src-tauri/resources/ffmpeg/` (ignorado pelo Git). Os executáveis são incluídos nos bundles Windows; a instalação final não exige Node, Rust ou FFmpeg no PATH. O motor roda em um processo separado do próprio aplicativo.
+
+No Windows estão disponíveis importação MOV/MP4/M4V, abertura/salvamento de projetos, captura do monitor principal sem cursor embutido, cursor separado, webcam com prévia, áudio do sistema por WASAPI loopback e microfone padrão em trilha independente. A captura solicita 60 fps e limita a resolução a 4K, sem ampliar telas menores. A exportação H.264/AAC aplica cortes, velocidade, câmera/zooms, cursores, gradiente/wallpaper/fundo desfocado, margens, cantos, sombra, máscaras/destaques, webcam, música e cliques, com progresso e cancelamento.
+
+Em **Abrir projeto**, entre na pasta `.framestudio` e selecione `project.json`. Projetos legados `.frame.json` também podem ser selecionados. Para atalhos, use Ctrl no lugar de ⌘. As permissões de câmera e microfone abrem as Configurações do Windows.
+
+Antes de gravar, escolha **Microfone para gravar** e **Saída de áudio a gravar** no painel **Áudio**, e **Webcam para gravar** no painel **Webcam**. A saída selecionada identifica os fones/alto-falantes cujo áudio será capturado por loopback; não altera a saída padrão do Windows. As escolhas e o tratamento da voz ficam salvos neste computador. **Atualizar dispositivos** detecta conexões e desconexões; um dispositivo escolhido que foi desconectado gera erro para você selecionar outro.
+
+O microfone vem com o perfil **Natural**: supressão espectral de ruído, corte de graves em 80 Hz, compressor leve e limitador de picos. O áudio passa pelos filtros durante a captura, antes de ser salvo na trilha independente. **Ambiente ruidoso** aumenta a redução; **Sem processamento** desativa a cadeia. Nos ajustes avançados, configure limiar, razão e ganho do compressor. O tratamento afeta novas gravações; trilhas já gravadas mantêm seu áudio. A supressão reduz ruído constante, mas não substitui isolamento acústico nem cancela vozes/reverberação.
+
+Validação do motor Windows (mídia sintética, sem acessar dispositivos):
+
+```powershell
+node tests/windows-native.test.mjs
+```
+
+Para incluir uma prévia real da webcam e uma gravação curta de tela, webcam, áudio do sistema e microfone, em arquivos temporários removidos ao terminar:
+
+```powershell
+node tests/windows-native.test.mjs --capture
+```
+
+Use `--desktop` para incluir abertura de projeto e reprodução reais no WebView2 (compile antes com `pnpm tauri build --debug --no-bundle`). Os dois parâmetros podem ser combinados.
+
+A composição Windows usa CPU e não tem aceleração GPU nesta versão. A suavidade das sombras e a mistura das amostras de motion blur podem diferir do Core Image no macOS. Desempenho de exportações longas/4K60, HDR e sincronismo em sessões longas ainda precisam de medição.
 
 ## Fluxo disponível
 
