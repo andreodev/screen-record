@@ -15,6 +15,26 @@
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const percentile = (values, p) => [...values].sort((a, b) => a - b)[Math.min(values.length - 1, Math.floor(values.length * p))] || 0;
   try {
+    if (config.mode === 'editing') {
+      const assert = (condition, message) => { if (!condition) throw new Error(message); };
+      const until = async check => { const started = performance.now(); while (!check()) { if (performance.now() - started > 30000) throw new Error('Editing UI timed out'); await wait(100); } };
+      await until(() => document.querySelector('video')?.readyState >= 2);
+      const add = async kind => { const select = document.querySelector('select[aria-label="Adicionar anotação"]'); select.value = kind; select.dispatchEvent(new Event('change', {bubbles:true})); await wait(200); };
+      await add('text'); await add('arrow');
+      assert(document.querySelectorAll('.video-viewport .preview-effect:not([hidden])').length === 2, 'Unselected annotations disappeared');
+      await add('watermark');
+      assert(document.querySelector('.scene > .preview-effect.watermark'), 'Watermark follows camera rather than canvas');
+      const image = document.querySelector('.preview-effect.text img'); assert(image?.src.startsWith('data:image/png;base64,'), 'Text did not render');
+      await wait(1000);
+      document.querySelector('.header-actions .export-button').click(); await wait(200);
+      document.querySelectorAll('.export-choice-grid button')[1].click(); document.querySelectorAll('.export-fps-grid button')[0].click(); await wait(100);
+      document.querySelector('dialog.export-dialog button[type="submit"]').click();
+      await until(() => (document.querySelector('.statusbar')?.textContent || '').includes('Exportação concluída:') || document.querySelector('.error-text')?.textContent);
+      assert(!document.querySelector('.error-text')?.textContent, document.querySelector('.error-text')?.textContent);
+      await invoke('report_preview_benchmark', {report:{phase:'editing',passed:true,annotations:3,preview:true,export:true}});
+      label.textContent = 'Anotações, marca d’água, autosave e exportação passaram.';
+      return;
+    }
     if (config.mode === 'recording-settings') {
       const assert = (value, message) => { if (!value) throw new Error(message); };
       const key = 'frame-studio-recording-options', previous = localStorage.getItem(key);
@@ -52,6 +72,49 @@
     let video;
     for (let i = 0; i < 150; i++) { video = document.querySelector('video'); if (video?.readyState >= 2) break; await wait(200); }
     if (!video || video.readyState < 2) throw new Error(`Benchmark video did not load: ${JSON.stringify({src:video?.currentSrc,ready:video?.readyState,error:video?.error?.message,ui:document.querySelector('.error-text')?.textContent,body:!video?document.body.innerText.slice(0,1800):undefined})}`);
+    if (config.mode === 'cursor-response') {
+      const assert = (value, message) => { if (!value) throw new Error(message); };
+      const set = async (node, value) => {
+        assert(node, 'Missing cursor response control');
+        Object.getOwnPropertyDescriptor(node.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype, 'value').set.call(node, String(value));
+        node.dispatchEvent(new Event(node.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); await wait(200);
+      };
+      document.querySelector('button[aria-label="Animações"]').click(); await wait(200);
+      const select = name => document.querySelector(`select[aria-label="${name}"]`);
+      const field = name => [...document.querySelectorAll('label')].find(n => n.textContent.trim().startsWith(name))?.querySelector('input');
+      const slider = document.querySelector('[aria-label="Posição da reprodução"]');
+      await set(slider, 1.1); video.pause(); await wait(300);
+      await set(select('Resposta ao movimento'), 'off');
+      const cursor = document.querySelector('.rendered-cursor');
+      assert(cursor, 'Cursor overlay missing');
+      const before = cursor.style.left + ':' + cursor.style.top;
+      await set(select('Resposta ao movimento'), 'dynamic');
+      assert(cursor.style.left + ':' + cursor.style.top !== before, 'Cursor shake did not reach the preview');
+      await set(field('Intensidade do shake do cursor'), 0);
+      assert(cursor.style.left + ':' + cursor.style.top === before, 'Zero intensity did not disable cursor shake');
+      await set(field('Intensidade do shake do cursor'), 70);
+      await set(select('Acompanhar cursor'), 'close');
+      await set(field('Antecipação do zoom'), 25);
+      assert(document.body.textContent.includes('Cliques preservados sempre'), 'Click preservation is not visible');
+      const direction = field('Impacto ao mudar de direção'); direction.click(); await wait(200);
+      await set(slider, 2.6); await wait(250);
+      const still = cursor.style.left + ':' + cursor.style.top;
+      await set(select('Resposta ao movimento'), 'off');
+      assert(cursor.style.left + ':' + cursor.style.top === still, 'Stopped cursor still shakes');
+      await set(select('Resposta ao movimento'), 'dynamic');
+      await wait(1200);
+      document.querySelector('.header-actions .export-button').click(); await wait(200);
+      document.querySelectorAll('.export-choice-grid button')[1].click();
+      document.querySelectorAll('.export-fps-grid button')[1].click(); await wait(100);
+      document.querySelector('dialog.export-dialog button[type="submit"]').click();
+      for (let i = 0; i < 300 && !(document.querySelector('.statusbar')?.textContent || '').includes('Exportação concluída:'); i++) {
+        if (document.querySelector('.error-text')?.textContent) throw new Error(document.querySelector('.error-text').textContent);
+        await wait(100);
+      }
+      assert((document.querySelector('.statusbar')?.textContent || '').includes('Exportação concluída:'), 'Cursor response export timed out');
+      await invoke('report_preview_benchmark', { report: { phase: 'cursor-response', passed: true, preview: true, idle: true, controls: true, export: true } });
+      shield.remove(); return;
+    }
     if(config.mode==='cinematic-check'){
       const assert=(v,m)=>{if(!v)throw new Error(m);};
       const field=text=>[...document.querySelectorAll('label')].find(n=>n.textContent.trim().startsWith(text))?.querySelector('input,select');

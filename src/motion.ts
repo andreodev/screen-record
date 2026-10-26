@@ -21,7 +21,7 @@ export function motionFrames(t: number, keys: CameraKey[], events: CursorEvent[]
         y: Math.max(halfY, Math.min(1 - halfY, current.camera.y + (camera.y - current.camera.y) * blur.pan)),
         scale,
       },
-      cursor: current.cursor && point ? { ...current.cursor, x: current.cursor.x + (point.x - current.cursor.x) * blur.cursor, y: current.cursor.y + (point.y - current.cursor.y) * blur.cursor } : null,
+      cursor: current.cursor && point ? current.cursor.down || current.cursor.rightDown || current.cursor.middleDown ? current.cursor : { ...current.cursor, x: current.cursor.x + (point.x - current.cursor.x) * blur.cursor, y: current.cursor.y + (point.y - current.cursor.y) * blur.cursor } : null,
     };
   });
   return frames.every(f => Math.abs(f.camera.x - current.camera.x) * current.camera.scale < .0001 && Math.abs(f.camera.y - current.camera.y) * current.camera.scale < .0001 && Math.abs(f.camera.scale - current.camera.scale) < .0001 && (!f.cursor || !current.cursor || Math.hypot(f.cursor.x - current.cursor.x, f.cursor.y - current.cursor.y) * current.camera.scale < .0001)) ? [current] : frames;

@@ -133,6 +133,7 @@ const moving = Array.from({ length: 240 }, (_, i) => ({ t: i / 60, x: .2 + .6 * 
 const follow = [{ id: 'follow', start: 0, end: 4, x: .2, y: .5, scale: 1.8, enabled: true, follow: true }];
 const route = cameraKeys(follow, 4, true, moving);
 assert.ok(cameraFromKeys(3, route).x > cameraFromKeys(1, route).x, 'Camera must follow large cursor movements');
+assert.ok(cameraFromKeys(2.5, route).x > cameraFromKeys(2, route).x, 'Follow camera should keep moving with a fast cursor path');
 for (const k of route) { assert.ok(k.x - .5 / k.scale >= -1e-8); assert.ok(k.x + .5 / k.scale <= 1 + 1e-8); }
 assert.deepEqual(cameraFromKeys(2, route), cameraFromKeys(2, route), 'Seek should be independent of playback history');
 console.log('Cursor checks passed: jitter reduction, click position, follow camera and crop bounds.');

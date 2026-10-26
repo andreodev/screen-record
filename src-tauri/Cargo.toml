@@ -28,7 +28,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 tiny-skia = "0.12"
 base64 = "0.22"
 windows = { version = "0.62", features = ["Win32_Media_Audio", "Win32_System_Com", "Win32_System_Performance", "Win32_Devices_FunctionDiscovery", "Win32_System_Com_StructuredStorage", "Win32_UI_Shell_PropertiesSystem", "Win32_System_Variant"] }
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_HiDpi"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_HiDpi", "Win32_Graphics_Gdi"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

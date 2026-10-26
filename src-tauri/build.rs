@@ -4,11 +4,8 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         let arch = if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("aarch64") { "arm64" } else { "x86_64" };
         let swift_target = format!("{arch}-apple-macos13.0");
-        let output = if std::env::var("PROFILE").as_deref() == Ok("release") {
-            std::path::PathBuf::from("native")
-        } else {
-            std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo output directory"))
-        };
+        let output = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("Cargo manifest directory"))
+            .join("target/frame-native");
         let bundle = output.join("FrameNative.app/Contents");
         std::fs::create_dir_all(bundle.join("MacOS")).expect("Create native helper app bundle");
         std::fs::copy("native/Info.plist", bundle.join("Info.plist")).expect("Write native helper app metadata");

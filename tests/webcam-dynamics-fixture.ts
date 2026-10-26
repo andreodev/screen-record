@@ -16,7 +16,7 @@ for(const duration of [.15,.4,2])for(const behavior of ['keep','shrink','grow','
   assert.ok(Math.abs(size-previous)<.09);previous=size;
   const camera:Webcam={path:'camera.mov',x:.8,y:.8,size:.32,shape:'rectangle',mode:'static',zoomBehavior:behavior,zoomSize:.16,transitionDuration:duration};
   const state=planWebcamState(webcamAt(camera,t),scale,'9:16');assert.ok(Math.abs(state.size-size)<1e-12);
-  cases.push({t,duration,behavior,scale,size,keys,webcamMotion:webcamMotionState({x:.3,y:.7},t,{...motionPresets.cinematic,webcamShake:true},[1,3]),bezier:webcamEase(t % 1,"cubic-bezier")});
+  cases.push({t,duration,behavior,scale,size,keys,motion:{...motionPresets.cinematic,webcamShake:true,impacts:[1,3]},webcamMotion:webcamMotionState({x:.3,y:.7},t,{...motionPresets.cinematic,webcamShake:true},[1,3]),bezier:webcamEase(t % 1,"cubic-bezier")});
  }
 }
 const camera:Webcam={path:'camera.mov',x:.8,y:.8,size:.32,shape:'rectangle',mode:'manual',zoomBehavior:'shrink',keyframes:[{t:1,x:.2,y:.3,size:.4,opacity:.2,easing:'ease-in-out'},{t:3,x:.8,y:.7,size:.2,opacity:1,easing:'ease-out'}]};

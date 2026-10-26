@@ -11,6 +11,12 @@ func require(_ condition: @autoclosure () -> Bool, _ message: String = "Export a
         let duration = try await asset.load(.duration).seconds
         let track = try await asset.loadTracks(withMediaType: .video).first!
         let size = try await track.load(.naturalSize)
+        if let flag = CommandLine.arguments.firstIndex(of: "--codec") {
+            let formats = try await track.load(.formatDescriptions)
+            let value = CMFormatDescriptionGetMediaSubType(formats.first!)
+            let expected = CommandLine.arguments[flag + 1].utf8.reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+            require(value == expected, "Unexpected encoded codec")
+        }
         let durationFlag = CommandLine.arguments.firstIndex(of: "--duration")
         let expectedDuration = durationFlag.map { Double(CommandLine.arguments[$0 + 1])! } ?? 2.2
         require(abs(duration - expectedDuration) < 0.07, "Unexpected trimmed duration: \(duration)")
@@ -116,6 +122,25 @@ func require(_ condition: @autoclosure () -> Bool, _ message: String = "Export a
             for other in [arrow, text] {
                 require(zip(hand, other).filter { abs(Int($0) - Int($1)) > 30 }.count > 60, "Cursor theme did not change with recorded context")
             }
+        }
+        if let flag = CommandLine.arguments.firstIndex(of: "--compare-cursor") {
+            let other = AVURLAsset(url: URL(fileURLWithPath: CommandLine.arguments[flag + 1]))
+            let comparison = AVAssetImageGenerator(asset: other)
+            comparison.requestedTimeToleranceBefore = .zero; comparison.requestedTimeToleranceAfter = .zero
+            let expectChange = CommandLine.arguments[flag + 2] == "different"
+            let at = Double(CommandLine.arguments[flag + 3])!
+            let a = try await generator.image(at: CMTime(seconds: at, preferredTimescale: 600)).image
+            let b = try await comparison.image(at: CMTime(seconds: at, preferredTimescale: 600)).image
+            func pixels(_ frame: CGImage) -> [UInt8] {
+                var data = [UInt8](repeating: 0, count: frame.width * frame.height * 4)
+                CIContext().render(CIImage(cgImage: frame), toBitmap: &data, rowBytes: frame.width * 4, bounds: CGRect(x: 0, y: 0, width: frame.width, height: frame.height), format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+                return data
+            }
+            let left = pixels(a), right = pixels(b)
+            require(left.count == right.count)
+            let differences = zip(left, right).map { abs(Int($0) - Int($1)) }
+            let changed = differences.filter { $0 > 24 }.count
+            require(expectChange ? changed > 60 : changed < 60, "Cursor comparison at \(at): \(changed) changed channels; expected \(expectChange ? "movement" : "preserved anchor")")
         }
         let audioTracks = try await asset.loadTracks(withMediaType: .audio)
         if CommandLine.arguments.contains("--audio") {

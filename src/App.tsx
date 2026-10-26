@@ -1,6 +1,11 @@
-import { cameraMotionFor, motionImpacts, webcamMotionState, cameraMotionBlur, cinematicKeys, motionPresets } from "./cinematic";
+import { cursorActivity, cursorIdleOpacity, lastTimeAt } from "./cursor-activity";
+import { applySuggestions, silenceSuggestions, typingSuggestions, type AudioAnalysis, type Suggestion } from "./pacing";
+import { parseSrt } from "./subtitles";
+import { CaptureSettings, type CaptureSelection } from "./CaptureSettings";
+import { EffectOverlay } from "./EffectOverlay";
+import { annotationImage, effectLabels, graphicEffect, canvasEffect } from "./annotations";
+import { cameraMotionFor, motionImpacts, webcamMotionState, cameraMotionBlur, cinematicKeys, motionPresets, cursorResponseFor, responsiveCursor } from "./cinematic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
 import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { assetPath } from "./asset-path";
@@ -13,7 +18,6 @@ import {
   backgrounds,
   cameraFromKeys,
   cameraKeys,
-  cameraPoint,
   cameraViewportTransform,
   clamp,
   cursorAt,
@@ -63,7 +67,7 @@ type Media = {
   microphonePath?: string;
 };
 type Project = {
-  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
   name: string;
   mediaPath: string;
   zooms: Zoom[];
@@ -92,6 +96,7 @@ type Panel =
   | "clip"
   | "effect"
   | "audio"
+  | "pacing"
   | "webcam";
 const clock = formatTime;
 function webcamForAspect(camera: Webcam, aspect: string): Webcam {
@@ -263,6 +268,11 @@ export default function App() {
     past: [],
     future: [],
   });
+  const [analysis, setAnalysis] = useState<AudioAnalysis | null>(null);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [includedSuggestions, setIncludedSuggestions] = useState<number[]>([]);
+  const [analyzing, setAnalyzing] = useState(false);
+  useEffect(() => { setAnalysis(null); setSuggestions([]); setIncludedSuggestions([]); }, [media?.path]);
   const [panel, setPanel] = useState<Panel>("background");
   const [selectedClip, setSelectedClip] = useState<number | null>(null);
   const [selectedEffect, setSelectedEffect] = useState<string | null>(null);
@@ -270,8 +280,12 @@ export default function App() {
   const [operation, setOperation] = useState<Operation>("idle");
   const [notice, setNotice] = useState("");
   const [projectPath, setProjectPath] = useState("");
+  const [recents, setRecents] = useState<string[]>([]);
+  useEffect(() => { if (isTauri()) void invoke<string[]>("recent_projects").then(setRecents).catch(() => undefined); }, [projectPath]);
   const pendingSeek = useRef(0);
   const [capturePermissionDenied, setCapturePermissionDenied] = useState(false);
+  const [captureQuality, setCaptureQuality] = useState({ resolution: 2160, fps: 60 });
+  const [captureSettingsOpen, setCaptureSettingsOpen] = useState(false);
   const [recordWebcam, setRecordWebcam] = useState(false);
   const [recordSystemAudio, setRecordSystemAudio] = useState(true);
   const [recordMicrophone, setRecordMicrophone] = useState(true);
@@ -280,9 +294,6 @@ export default function App() {
   const [devicesLoading, setDevicesLoading] = useState(false);
   const [devicesError, setDevicesError] = useState("");
   const [webcamSourceAspect, setWebcamSourceAspect] = useState(16 / 9);
-  const [recordingCameraPosition, setRecordingCameraPosition] = useState({ x: 0.78, y: 0.78 });
-  const [cameraPreviewReady, setCameraPreviewReady] = useState(false);
-  const [cameraPreviewFrame, setCameraPreviewFrame] = useState("");
   const [cameraPreviewError, setCameraPreviewError] = useState("");
   const [error, setError] = useState("");
   const [time, setTime] = useState(0),
@@ -297,6 +308,9 @@ export default function App() {
   const [webcamKeyTimeDraft, setWebcamKeyTimeDraft] = useState<number | null>(null);
   const [reelMode, setReelMode] = useState(false);
   const exportDialog = useRef<HTMLDialogElement>(null);
+  const [exportCodec, setExportCodec] = useState("h264");
+  const [exportQuality, setExportQuality] = useState("high");
+  const exportCodecLabels: Record<string, string> = { h264: "MP4 · H.264", hevc: "MP4 · HEVC", "prores-lt": "MOV · ProRes 422 LT", prores: "MOV · ProRes 422", "prores-hq": "MOV · ProRes 422 HQ", "prores-4444": "MOV · ProRes 4444" };
   const [exportResolution, setExportResolution] = useState(2160);
   const [exportFps, setExportFps] = useState(60);
   const [presetsOpen, setPresetsOpen] = useState(false);
@@ -312,6 +326,7 @@ export default function App() {
     webcamVisual = useRef<HTMLDivElement>(null),
     plane = useRef<HTMLDivElement>(null),
     cursor = useRef<HTMLDivElement>(null),
+    clickRing = useRef<HTMLDivElement>(null),
     qualityCanvas = useRef<HTMLCanvasElement>(null),
     videoBackground = useRef<HTMLCanvasElement>(null);
   const motionCanvas = useRef<HTMLCanvasElement>(null),
@@ -332,8 +347,6 @@ export default function App() {
   const playingRef = useRef(playing);
   playingRef.current = playing;
   const lastClickSoundTime = useRef<number | null>(null);
-  const recordingCameraKeys = useRef<WebcamKeyframe[]>([]);
-  const recordingCameraDrag = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const viewportRef = useRef({ width: 700, height: 400 });
   const desktop = isTauri(),
     busy = operation !== "idle";
@@ -342,7 +355,7 @@ export default function App() {
   const updateMicrophoneProcessing = (patch: Partial<MicrophoneProcessing>) => setRecordingOptions(options => ({ ...options, microphoneProcessing: { ...options.microphoneProcessing, ...patch } }));
   useEffect(() => { saveRecordingOptions(recordingOptions); }, [recordingOptions]);
   const refreshDevices = useCallback(async () => {
-    if (!desktop || !windowsDesktop || busy) return;
+    if (!desktop || busy) return;
     setDevicesLoading(true); setDevicesError("");
     try { setRecordingDevices(await invoke<RecordingDevices>("list_recording_devices")); }
     catch (cause) { setDevicesError(String(cause)); }
@@ -354,25 +367,14 @@ export default function App() {
     window.addEventListener('focus', refresh);
     return () => window.removeEventListener('focus', refresh);
   }, [refreshDevices]);
+  const cameraPreviewQueue = useRef(Promise.resolve());
   useEffect(() => {
-    if (!desktop || !recordWebcam || operation !== "idle") {
-      setCameraPreviewReady(false);
-      setCameraPreviewFrame("");
-      return;
-    }
-    setCameraPreviewReady(false);
-    setCameraPreviewFrame("");
-    setCameraPreviewError("");
-    void invoke("start_camera_preview", { deviceId: recordingOptions.cameraDevice }).catch((cause) => {
-      const message = String(cause);
-      setCameraPreviewError(message);
-      setError(message);
-    });
-    return () => {
-      void invoke("stop_camera_preview").catch(() => undefined);
-      setCameraPreviewReady(false);
-    };
-  }, [desktop, recordWebcam, operation, recordingOptions.cameraDevice]);
+    if (!desktop) return;
+    cameraPreviewQueue.current = cameraPreviewQueue.current.catch(() => undefined).then(async () => {
+      if (recordWebcam) await invoke("start_camera_preview", { deviceId: recordingOptions.cameraDevice });
+      else await invoke("stop_camera_preview");
+    }).catch(cause => { setCameraPreviewError(String(cause)); setError(String(cause)); });
+  }, [desktop, recordWebcam, recordingOptions.cameraDevice]);
   const look = project?.appearance || defaults;
   const ranges = useMemo(
     () => (project ? clipRanges(project.trim, project.clips) : []),
@@ -382,6 +384,7 @@ export default function App() {
   const editedTime = sourceToEdited(time, ranges);
   const currentZoom = project?.zooms.find((z) => z.id === selected);
   const cameraMode = look.cameraMode ?? "hybrid";
+  const visibleEffects = project?.effects?.filter(effect => effect.id === selectedEffect || effect.start <= time + 1 && effect.end >= time - 1) ?? [];
   const currentEffect = project?.effects?.find(
     (effect) => effect.id === selectedEffect,
   );
@@ -389,7 +392,7 @@ export default function App() {
   const webcamKeyed = !!selectedWebcam?.keyframes?.some((key) => Math.abs(key.t - time) < 0.02);
   const canEditCursor = !!media?.cursorCaptured && media.cursor.length > 0;
   const cursorMotion = cursorMotionFor(look);
-  const events = useMemo(
+  const smoothedEvents = useMemo(
     () =>
       cursorMotion === "original"
         ? media?.cursor || []
@@ -403,6 +406,7 @@ export default function App() {
           ),
     [media, cursorMotion],
   );
+  const activity = useMemo(() => cursorActivity(media?.cursor ?? []), [media?.cursor]);
   const clickTimes = useMemo(() => {
     const clicks: number[] = [];
     let wasDown = false;
@@ -445,6 +449,7 @@ export default function App() {
   const visibleSpanX = visibleVideo.x,
     visibleSpanY = visibleVideo.y;
   const cameraMotion = useMemo(() => cameraMotionFor(look), [look.cameraMotion, look.cameraSpring]);
+  const cursorResponse = useMemo(() => cursorResponseFor(look), [look.cursorResponse]);
   const baseTrajectory = useMemo(
     () =>
       media && project
@@ -452,7 +457,7 @@ export default function App() {
             cameraZooms,
             media.duration,
             look.smooth,
-            events,
+            smoothedEvents,
             cameraMotion.spring,
             visibleSpanX,
             visibleSpanY,
@@ -461,6 +466,7 @@ export default function App() {
             sourceAspect,
             contentAspect,
             cameraMotion.damping,
+            { cursorFollow: look.cursorFollow, zoomAnticipation: look.zoomAnticipation },
           )
         : [],
     [
@@ -472,7 +478,9 @@ export default function App() {
       followCropCursor,
       cameraMode,
       look.aspect,
-      events,
+      smoothedEvents,
+      look.cursorFollow,
+      look.zoomAnticipation,
       visibleSpanX,
       visibleSpanY,
     ],
@@ -483,6 +491,12 @@ export default function App() {
     const height = layout.height * (size.height - 2 * cameraPadding) / size.height;
     return cinematicKeys(baseTrajectory, cameraMotion, width, height);
   }, [baseTrajectory, cameraMotion, sourceAspect, contentAspect, cropFill, size.width, size.height, cameraPadding, visibleSpanX, visibleSpanY]);
+  const events = useMemo(() => {
+    const layout = frameLayout(sourceAspect, contentAspect, cropFill);
+    const width = layout.width * (size.width - 2 * cameraPadding) / size.width;
+    const height = layout.height * (size.height - 2 * cameraPadding) / size.height;
+    return responsiveCursor(smoothedEvents, trajectory, cursorResponse, width, height);
+  }, [smoothedEvents, trajectory, cursorResponse, sourceAspect, contentAspect, cropFill, size.width, size.height, cameraPadding]);
   const impactTimes = useMemo(() => motionImpacts(baseTrajectory, cameraMotion.impacts), [baseTrajectory, cameraMotion.impacts]);
   const cameraCuts = useMemo(
     () => trajectory.filter((k) => k.cut).map((k) => k.t),
@@ -565,7 +579,7 @@ export default function App() {
       setPlaying(false);
       setMedia(m);
       const loaded: Project = document || {
-        version: m.webcamPath || m.microphonePath ? 11 : 1,
+        version: 13,
         mediaPath: m.path,
         name: m.path.split("/").pop() || "Novo take",
         zooms: autoZooms(m.cursor, m.duration),
@@ -651,10 +665,9 @@ export default function App() {
       setOperation("recording");
       setElapsed(0);
     });
-    void register<string>("camera-preview-frame", (frame) => {
-      setCameraPreviewFrame(`data:image/jpeg;base64,${frame}`);
-      setCameraPreviewReady(true);
-    });
+    void register("camera-preview-closed", () => { setRecordWebcam(false); setCameraPreviewError(""); });
+    void register("camera-preview-reset", () => { setCameraPreviewError(""); setError(""); });
+    void register<string>("camera-preview-device", deviceId => setRecordingOptions(options => options.cameraDevice === (deviceId || null) ? options : { ...options, cameraDevice: deviceId || null }));
     void register<string>("camera-preview-error", (message) => {
       setCameraPreviewError(message);
       setError(message);
@@ -665,17 +678,6 @@ export default function App() {
     void register<Media>("recording-finished", (m) => {
       setRecordWebcam(false);
       load(m);
-      const keys = recordingCameraKeys.current.filter((key) => key.t <= m.duration).sort((a, b) => a.t - b.t);
-      if (m.webcamPath && keys.length > 1) {
-        const loaded = projectRef.current;
-        if (loaded?.webcam) {
-          const first = keys[0]!;
-          const next = { ...loaded, version: 11 as const, webcam: { ...loaded.webcam, x: first.x, y: first.y, mode: "manual" as const, keyframes: keys } };
-          projectRef.current = next;
-          setProject(next);
-        }
-      }
-      recordingCameraKeys.current = [];
     });
     void register<{ progress: number }>("export-progress", (e) =>
       setProgress(e.progress),
@@ -691,7 +693,7 @@ export default function App() {
         "take_pending_project",
       )
         .then((result) => {
-          if (result) load(result.media, result.project, result.path);
+          if (result) { load(result.media, result.project, result.path); if ("recovered" in result && result.recovered) setNotice("Projeto recuperado do backup. O manifesto danificado foi preservado no pacote."); }
         })
         .catch((e) => setError(String(e)));
     });
@@ -727,6 +729,7 @@ export default function App() {
     impactTimes,
     events,
     clickTimes,
+    activity,
     assetRoot,
     ranges,
     cameraCuts,
@@ -742,6 +745,7 @@ export default function App() {
     impactTimes,
     events,
     clickTimes,
+    activity,
     assetRoot,
     ranges,
     cameraCuts,
@@ -758,6 +762,7 @@ export default function App() {
     impactTimes,
     events,
     clickTimes,
+    activity,
     assetRoot,
     ranges,
     cameraCuts,
@@ -785,6 +790,21 @@ export default function App() {
       const style = webcamFrameStyle(state, data.sceneWidth, data.sceneHeight, aspect);
       Object.assign(webcamVisual.current.style, { borderRadius: style.borderRadius, borderWidth: style.borderWidth, boxShadow: style.boxShadow, opacity: String(style.opacity) });
     }
+    scene.current?.querySelectorAll<HTMLElement>("[data-effect-start]").forEach(element => {
+      const active = t >= Number(element.dataset.effectStart) && t < Number(element.dataset.effectEnd);
+      element.hidden = !active;
+      element.style.setProperty("--mask-blur", `${14 * data.sceneWidth / 1920 / cam.scale}px`);
+      element.style.borderRadius = `${8 * data.sceneWidth / 1920}px`;
+      const loupe = element.querySelector("canvas"), source = video.current;
+      const effect = p.effects?.find(item => item.id === element.dataset.effectId);
+      if (active && loupe && source && source.readyState >= 2 && effect) {
+        const width = Math.max(16, Math.round(effect.width * view.width * 2)), height = Math.max(16, Math.round(effect.height * view.height * 2));
+        if (loupe.width !== width) loupe.width = width;
+        if (loupe.height !== height) loupe.height = height;
+        const sw = source.videoWidth * effect.width / 2, sh = source.videoHeight * effect.height / 2;
+        loupe.getContext("2d")?.drawImage(source, source.videoWidth * effect.x - sw / 2, source.videoHeight * effect.y - sh / 2, sw, sh, 0, 0, loupe.width, loupe.height);
+      }
+    });
     const previousSoundTime = lastClickSoundTime.current;
     if (
       playingRef.current &&
@@ -829,13 +849,25 @@ export default function App() {
         p.appearance.cursorSize > 0
           ? "block"
           : "none";
+    if (cursor.current) cursor.current.style.opacity = String(p.appearance.hideIdleCursor ? cursorIdleOpacity(t, data.activity) : 1);
+    if (clickRing.current) {
+      const last = lastTimeAt(t, data.clickTimes), age = last === undefined ? 1 : (t - last) / .35;
+      const point = last === undefined ? null : cursorAt(last, m.cursor);
+      const enabled = point && age < 1 && !clip?.hideCursor && p.appearance.cursorSize > 0 && p.appearance.clickEffect && p.appearance.clickEffect !== "none";
+      clickRing.current.hidden = !enabled;
+      if (enabled) {
+        const position = { x: point.x * view.width, y: point.y * view.height };
+        const radius = p.appearance.cursorSize * data.sceneWidth / 1920 * (p.appearance.clickEffect === "ripple" ? .7 + age * 1.5 : 1);
+        Object.assign(clickRing.current.style, { left: `${position.x}px`, top: `${position.y}px`, width: `${radius * 2}px`, height: `${radius * 2}px`, opacity: String((1 - age) * .65), background: p.appearance.clickEffect === "circle" ? "#ad91ff" : "transparent", borderWidth: `${2 * data.sceneWidth / 1920}px` });
+      }
+    }
     const focus = renderData.current.currentZoom;
     if (focusMarker.current && focus) {
       focusMarker.current.style.left = `${focus.x * view.width}px`;
       focusMarker.current.style.top = `${focus.y * view.height}px`;
     }
     if (cursor.current && point) {
-      const cursorPosition = cameraPoint(cam, point, view.width, view.height, data.sceneWidth, data.sceneHeight);
+      const cursorPosition = { x: point.x * view.width, y: point.y * view.height };
       cursor.current.style.left = `${cursorPosition.x}px`;
       cursor.current.style.top = `${cursorPosition.y}px`;
       const entry = cursorImage(p.appearance, point),
@@ -844,7 +876,7 @@ export default function App() {
         entry,
         p.appearance.cursorSize,
         scene.current?.clientWidth || 700,
-        cam.scale,
+        1,
       );
       cursor.current.style.width = `${dimensions.width}px`;
       cursor.current.style.height = `${dimensions.height}px`;
@@ -911,8 +943,7 @@ export default function App() {
     if (videoViewport.current) videoViewport.current.style.backgroundColor = enabled ? "transparent" : "";
     if (plane.current)
       plane.current.style.visibility = enabled ? "hidden" : "visible";
-    // Keep the sharp cursor overlay independent from the motion-blur canvas.
-    if (cursor.current) cursor.current.style.visibility = "visible";
+    if (cursor.current) cursor.current.style.visibility = enabled ? "hidden" : "visible";
     const proxy = qualityCanvas.current;
     const useProxy = data.quality < 1 && !enabled;
     if (source) source.style.visibility = useProxy ? "hidden" : "visible";
@@ -992,6 +1023,14 @@ export default function App() {
           view.width,
           view.height,
         );
+        const image = cursor.current?.querySelector("img");
+        if (sample.cursor && m.cursorCaptured && p.appearance.cursorSize > 0 && image?.complete && image.naturalWidth) {
+          const entry = cursorImage(p.appearance, sample.cursor);
+          const dimensions = cursorDimensions(entry, p.appearance.cursorSize, data.sceneWidth, 1);
+          sampleCtx.globalAlpha = p.appearance.hideIdleCursor ? cursorIdleOpacity(t, data.activity) : 1;
+          sampleCtx.drawImage(image, sample.cursor.x * view.width - entry.hotspotX * dimensions.width, sample.cursor.y * view.height - entry.hotspotY * dimensions.height, dimensions.width, dimensions.height);
+          sampleCtx.globalAlpha = 1;
+        }
         ctx.globalCompositeOperation = "lighter";
         ctx.globalAlpha = 1 / frames.length;
         ctx.drawImage(sampleCanvas, 0, 0);
@@ -1297,6 +1336,39 @@ export default function App() {
       setOperation("idle");
     }
   }
+  async function importSubtitles() {
+    if (!media || !project) return;
+    const content = await action<string | null>("import_subtitles");
+    if (!content) return;
+    try {
+      const captions = parseSrt(content, media.duration);
+      edit(p => ({ ...p, version: 12, effects: [...(p.effects ?? []), ...captions] }));
+      setSelectedEffect(captions[0].id); setPanel("effect"); seek(captions[0].start);
+      setNotice(`${captions.length} legendas adicionadas. Tempos referem-se ao vídeo original.`);
+    } catch (error) { setError(String(error)); }
+  }
+  async function suggestPacing(kind: "silence" | "typing") {
+    if (!media || !project || analyzing) return;
+    const path = media.path;
+    setAnalyzing(true);
+    try {
+      const audio = kind === "silence" ? analysis ?? await invoke<AudioAnalysis>("analyze_recording_audio") : null;
+      if (mediaRef.current?.path !== path) return;
+      if (audio) setAnalysis(audio);
+      const next = audio ? silenceSuggestions(audio) : typingSuggestions(media.cursor);
+      setSuggestions(next); setIncludedSuggestions(next.map((_, index) => index));
+      setNotice(next.length ? `${next.length} sugestões. Revise antes de aplicar.` : "Nenhum intervalo encontrado.");
+    } catch (error) { setError(String(error)); }
+    finally { setAnalyzing(false); }
+  }
+  function applyPacing() {
+    if (!project || !media) return;
+    const clips = applySuggestions(ranges.map(({ index: _index, ...clip }) => clip), suggestions.filter((_, index) => includedSuggestions.includes(index)));
+    if (editedDuration(clips) < .1) { setError("A sugestão removeria todo o vídeo. Desmarque alguns intervalos."); return; }
+    video.current?.pause();
+    edit(p => ({ ...p, version: 12, clips })); setSuggestions([]); setIncludedSuggestions([]);
+    setNotice("Sugestões aplicadas. Use Desfazer para recuperar a edição anterior.");
+  }
   async function chooseBackgroundAudio() {
     const path = await action<string | null>("choose_background_audio");
     if (path)
@@ -1331,7 +1403,13 @@ export default function App() {
       project: Project;
       path: string;
     } | null>("open_project");
-    if (result) load(result.media, result.project, result.path);
+    if (result) { load(result.media, result.project, result.path); if ("recovered" in result && result.recovered) setNotice("Projeto recuperado do backup. O manifesto danificado foi preservado no pacote."); }
+    else setOperation("idle");
+  }
+  async function openRecent(path: string) {
+    video.current?.pause(); setOperation("opening");
+    const result = await action<{ media: Media; project: Project; path: string; recovered?: boolean }>("open_recent_project", { path });
+    if (result) { load(result.media, result.project, result.path); if (result.recovered) setNotice("Projeto recuperado do backup. O manifesto danificado foi preservado no pacote."); }
     else setOperation("idle");
   }
   async function saveProject(saveAs = false) {
@@ -1365,51 +1443,17 @@ export default function App() {
       setNotice(`Projeto salvo com mídia incluída: ${result.path}`);
     }
   }
-  async function record() {
+  async function record(selection: CaptureSelection) {
+    setCaptureQuality({ resolution: selection.resolution, fps: selection.fps });
     video.current?.pause();
     setElapsed(0);
-    setRecordingCameraPosition({ x: 0.78, y: 0.78 });
-    recordingCameraKeys.current = recordWebcam ? [{ t: 0, x: 0.78, y: 0.78, size: 0.24 }] : [];
-    recordingCameraDrag.current = null;
-    await invoke("stop_camera_preview").catch(() => undefined);
     setOperation("starting");
     setNotice(
       recordMicrophone ? "Iniciando tela e áudio. Autorize o microfone se solicitado." : recordWebcam
         ? "Aguardando a tela e a webcam. Autorize o acesso à câmera se solicitado."
         : "Aguardando os primeiros frames da tela.",
     );
-    await action("start_recording", { withWebcam: recordWebcam, withSystemAudio: recordSystemAudio, withMicrophone: recordMicrophone, options: windowsDesktop ? recordingOptions : undefined });
-  }
-  function recordingCameraPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (operation !== "recording") return;
-    const bounds = event.currentTarget.parentElement?.getBoundingClientRect();
-    if (!bounds || !bounds.width || !bounds.height) return;
-    const pointerX = (event.clientX - bounds.left) / bounds.width;
-    const pointerY = (event.clientY - bounds.top) / bounds.height;
-    recordingCameraDrag.current = { offsetX: pointerX - recordingCameraPosition.x, offsetY: pointerY - recordingCameraPosition.y };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-  function recordingCameraPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
-    const drag = recordingCameraDrag.current;
-    const bounds = event.currentTarget.parentElement?.getBoundingClientRect();
-    if (!drag || !bounds || !bounds.width || !bounds.height) return;
-    const x = clamp((event.clientX - bounds.left) / bounds.width - drag.offsetX, 0.12, 0.88);
-    const y = clamp((event.clientY - bounds.top) / bounds.height - drag.offsetY, 0.12, 0.88);
-    setRecordingCameraPosition({ x, y });
-    const key = { t: Math.max(0, elapsed), x, y, size: 0.24 };
-    const keys = recordingCameraKeys.current;
-    const last = keys[keys.length - 1];
-    if (last && last.t === 0 && key.t === 0) keys[0] = key;
-    else if (last && last.t > 0 && key.t - last.t < 0.2) keys[keys.length - 1] = { ...key, t: last.t };
-    else if (!last || key.t > last.t) keys.push(key);
-  }
-  function recordingCameraPointerUp() {
-    const wasDragging = recordingCameraDrag.current !== null;
-    recordingCameraDrag.current = null;
-    if (!wasDragging) return;
-    const keys = recordingCameraKeys.current;
-    const last = keys[keys.length - 1];
-    if (last && elapsed > last.t) keys.push({ ...recordingCameraPosition, t: elapsed, size: 0.24 });
+    await action("start_recording", { withWebcam: recordWebcam, withSystemAudio: recordSystemAudio, withMicrophone: recordMicrophone, options: { ...recordingOptions, ...selection } });
   }
   async function stop() {
     const previous = operation;
@@ -1430,6 +1474,7 @@ export default function App() {
           ({ index: _index, ...clip }) => clip,
         ),
         effects: project.effects ?? [],
+        annotationImages: Object.fromEntries((project.effects ?? []).filter(effect => graphicEffect(effect.kind)).map(effect => [effect.id, annotationImage(effect, canvasEffect(effect.kind) ? sceneAspect : sourceAspect).split(",")[1]])),
         backgroundAudio: project.backgroundAudio,
         microphone: project.microphone,
         sourceVolume: project.sourceVolume ?? 1,
@@ -1438,6 +1483,8 @@ export default function App() {
         keys: trajectory,
         cursor: events,
         rawCursor: media.cursor,
+        cursorActivity: activity,
+        codec: exportCodec, quality: exportQuality,
         resolution: exportResolution,
         fps: exportFps,
       },
@@ -1447,7 +1494,7 @@ export default function App() {
   function appearance(patch: Partial<Appearance>) {
     edit((p) => ({
       ...p,
-      version: 11,
+      version: 13,
       appearance: {
         ...p.appearance,
         ...(patch.smooth !== undefined
@@ -1520,7 +1567,7 @@ export default function App() {
     if (!selectedEffect) return;
     edit((p) => ({
       ...p,
-      version: 5,
+      version: 12,
       effects: (p.effects ?? []).map((effect) =>
         effect.id === selectedEffect ? { ...effect, ...patch } : effect,
       ),
@@ -1628,17 +1675,18 @@ export default function App() {
     const effect: Effect = {
       id: crypto.randomUUID(),
       kind,
-      start,
-      end: Math.min(media.duration, start + 2),
-      x: 0.5,
-      y: 0.5,
-      width: 0.28,
-      height: 0.22,
-      opacity: 0.28,
+      start: kind === "watermark" ? 0 : start,
+      end: kind === "watermark" ? media.duration : Math.min(media.duration, start + 2),
+      x: kind === "watermark" ? 0.83 : 0.5,
+      y: kind === "caption" ? 0.87 : kind === "watermark" ? 0.08 : 0.5,
+      width: kind === "caption" ? 0.8 : 0.28,
+      height: canvasEffect(kind) ? 0.12 : 0.22,
+      opacity: kind === "highlight" ? 0.28 : kind === "spotlight" ? 0.65 : 1,
+      ...(["text", "caption", "watermark"].includes(kind) ? { text: kind === "watermark" ? "Sua marca" : "Seu texto" } : {}),
     };
     edit((p) => ({
       ...p,
-      version: 5,
+      version: 12,
       effects: [...(p.effects ?? []), effect],
     }));
     setSelected(null);
@@ -1655,8 +1703,7 @@ export default function App() {
     event.preventDefault();
     event.stopPropagation();
     video.current?.pause();
-    const viewport = event.currentTarget
-        .closest(".video-viewport")!
+    const viewport = (event.currentTarget.closest(".video-viewport") ?? event.currentTarget.closest(".scene"))!
         .getBoundingClientRect(),
       startX = event.clientX,
       startY = event.clientY,
@@ -1675,10 +1722,10 @@ export default function App() {
         setFuture([]);
         saved = true;
       }
-      const current = p.effects?.find((item) => item.id === effect.id);
+      const current = original.effects?.find((item) => item.id === effect.id);
       if (!current) return;
-      const dx = ((e.clientX - startX) / viewport.width) * visibleSpanX,
-        dy = ((e.clientY - startY) / viewport.height) * visibleSpanY;
+      const dx = ((e.clientX - startX) / viewport.width),
+        dy = ((e.clientY - startY) / viewport.height);
       const nextEffect =
         kind === "move"
           ? {
@@ -1709,7 +1756,7 @@ export default function App() {
             };
       const next = {
         ...p,
-        version: 5 as const,
+        version: 12 as const,
         effects: p.effects?.map((item) =>
           item.id === effect.id ? nextEffect : item,
         ),
@@ -1802,7 +1849,7 @@ export default function App() {
       "take_pending_project",
     )
       .then((result) => {
-        if (result) load(result.media, result.project, result.path);
+        if (result) { load(result.media, result.project, result.path); if ("recovered" in result && result.recovered) setNotice("Projeto recuperado do backup. O manifesto danificado foi preservado no pacote."); }
       })
       .catch((e) => setError(String(e)));
   }, [desktop, operation, load]);
@@ -1962,6 +2009,8 @@ export default function App() {
               ))}
             </div>
           </section>
+          <label className="capture-device-select"><span>Formato</span><select aria-label="Formato de exportação" value={exportCodec} onChange={event => setExportCodec(event.target.value)}>{Object.entries(exportCodecLabels).map(([codec, label]) => <option key={codec} value={codec}>{label}</option>)}</select></label>
+          {!exportCodec.startsWith("prores") && <label className="capture-device-select"><span>Qualidade</span><select aria-label="Qualidade da exportação" value={exportQuality} onChange={event => setExportQuality(event.target.value)}><option value="web">Web · arquivo menor</option><option value="balanced">Equilibrada</option><option value="high">Alta</option></select></label>}
           <section className="export-section">
             <div className="export-section-title">
               <strong>Quadros por segundo</strong>
@@ -1993,7 +2042,7 @@ export default function App() {
           <div className="export-summary">
             <span className="export-summary-dot" />
             <span>
-              <strong>MP4 · H.264</strong>
+              <strong>{exportCodecLabels[exportCodec]}</strong>
               <small>
                 Proporção {look.aspect === "auto" ? "original" : look.aspect} ·
                 aparência, zooms e cursor incluídos
@@ -2018,6 +2067,7 @@ export default function App() {
           </div>
         </form>
       </dialog>
+      {captureSettingsOpen && <CaptureSettings close={() => setCaptureSettingsOpen(false)} start={selection => { setCaptureSettingsOpen(false); void record(selection); }} />}
       <header className="editor-header">
         <div className="header-left">
           <span className="brand-mark">▰</span>
@@ -2036,6 +2086,7 @@ export default function App() {
           >
             Abrir projeto
           </button>
+          {!!recents.length && <select aria-label="Projetos recentes" value="" disabled={busy} onChange={event => void openRecent(event.target.value)}><option value="" disabled>Recentes</option>{recents.map(path => <option key={path} value={path}>{path.split(/[/\\]/).pop()}</option>)}</select>}
         </div>
         <span className="project-name">
           {project?.name || "Novo projeto"}
@@ -2274,7 +2325,7 @@ export default function App() {
             <button
               className="new-recording"
               disabled={!desktop || busy}
-              onClick={() => void record()}
+              onClick={() => setCaptureSettingsOpen(true)}
             >
               <span className="red-dot" />
               Nova gravação
@@ -2292,6 +2343,10 @@ export default function App() {
                 } as React.CSSProperties
               }
             >
+              {visibleEffects.filter(effect => canvasEffect(effect.kind)).map(effect => <EffectOverlay key={effect.id} effect={effect} selected={selectedEffect === effect.id} sourceAspect={sceneAspect}
+                select={() => { setSelectedEffect(effect.id); setSelected(null); setSelectedClip(null); setPanel("effect"); }}
+                change={patch => edit(p => ({ ...p, version: 12, effects: p.effects?.map(item => item.id === effect.id ? { ...item, ...patch } : item) }))}
+                drag={dragEffect} />)}
               {reelMode && (
                 <div className="reel-ui" aria-hidden="true">
                   <div className="reel-top">
@@ -2447,122 +2502,32 @@ export default function App() {
                       aria-hidden="true"
                     />
                   </div>
-                  {currentEffect &&
-                    time >= currentEffect.start &&
-                    time < currentEffect.end && (
-                      <div
-                        className={`preview-effect ${currentEffect.kind} ${selectedEffect === currentEffect.id ? "selected" : ""}`}
-                        role="button"
-                        tabIndex={0}
-                        aria-label={
-                          currentEffect.kind === "mask"
-                            ? "Área desfocada, arraste para mover"
-                            : "Área destacada, arraste para mover"
-                        }
-                        onPointerDown={(e) => dragEffect(e, currentEffect)}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedEffect(currentEffect.id);
-                          setSelected(null);
-                          setSelectedClip(null);
-                          setPanel("effect");
-                        }}
-                        onKeyDown={(e) => {
-                          const dx =
-                              e.key === "ArrowLeft"
-                                ? -0.01
-                                : e.key === "ArrowRight"
-                                  ? 0.01
-                                  : 0,
-                            dy =
-                              e.key === "ArrowUp"
-                                ? -0.01
-                                : e.key === "ArrowDown"
-                                  ? 0.01
-                                  : 0;
-                          if (dx || dy) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            effectChange({
-                              x: clamp(
-                                currentEffect.x + dx,
-                                currentEffect.width / 2,
-                                1 - currentEffect.width / 2,
-                              ),
-                              y: clamp(
-                                currentEffect.y + dy,
-                                currentEffect.height / 2,
-                                1 - currentEffect.height / 2,
-                              ),
-                            });
-                          }
-                        }}
-                        style={
-                          {
-                            left: `${(0.5 + (currentEffect.x - currentEffect.width / 2 - 0.5) / visibleSpanX) * 100}%`,
-                            top: `${(0.5 + (currentEffect.y - currentEffect.height / 2 - 0.5) / visibleSpanY) * 100}%`,
-                            width: `${(currentEffect.width / visibleSpanX) * 100}%`,
-                            height: `${(currentEffect.height / visibleSpanY) * 100}%`,
-                            "--effect-opacity": currentEffect.opacity,
-                          } as React.CSSProperties
-                        }
-                      >
-                        <span
-                          className="effect-resize"
-                          role="button"
-                          tabIndex={0}
-                          aria-label="Redimensionar área"
-                          onPointerDown={(e) =>
-                            dragEffect(e, currentEffect, "resize")
-                          }
-                          onKeyDown={(e) => {
-                            const dw =
-                                e.key === "ArrowLeft"
-                                  ? -0.01
-                                  : e.key === "ArrowRight"
-                                    ? 0.01
-                                    : 0,
-                              dh =
-                                e.key === "ArrowUp"
-                                  ? -0.01
-                                  : e.key === "ArrowDown"
-                                    ? 0.01
-                                    : 0;
-                            if (dw || dh) {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              effectChange(
-                                dw
-                                  ? {
-                                      width: clamp(
-                                        currentEffect.width + dw,
-                                        0.04,
-                                        1,
-                                      ),
-                                      x: clamp(
-                                        currentEffect.x,
-                                        currentEffect.width / 2,
-                                        1 - currentEffect.width / 2,
-                                      ),
-                                    }
-                                  : {
-                                      height: clamp(
-                                        currentEffect.height + dh,
-                                        0.04,
-                                        1,
-                                      ),
-                                      y: clamp(
-                                        currentEffect.y,
-                                        currentEffect.height / 2,
-                                        1 - currentEffect.height / 2,
-                                      ),
-                                    },
-                              );
-                            }
-                          }}
-                        />
-                      </div>
-                    )}
+                <div ref={clickRing} className="click-ring" hidden aria-hidden="true" />
+                <div
+                  className="rendered-cursor"
+                  ref={cursor}
+                  style={{
+                    display:
+                      canEditCursor && look.cursorSize > 0 ? "block" : "none",
+                    ...cursorDimensions(
+                      selectedCursor,
+                      look.cursorSize,
+                      size.width,
+                    ),
+                  }}
+                >
+                  <img
+                    src={assetURL(selectedCursor.file)}
+                    alt=""
+                    style={{
+                      transform: `translate(${-selectedCursor.hotspotX * 100}%,${-selectedCursor.hotspotY * 100}%)`,
+                    }}
+                  />
+                </div>
+                  {visibleEffects.filter(effect => !canvasEffect(effect.kind)).map(effect => <EffectOverlay key={effect.id} effect={effect} selected={selectedEffect === effect.id} sourceAspect={sourceAspect}
+                    select={() => { setSelectedEffect(effect.id); setSelected(null); setSelectedClip(null); setPanel("effect"); }}
+                    change={patch => edit(p => ({ ...p, version: 12, effects: p.effects?.map(item => item.id === effect.id ? { ...item, ...patch } : item) }))}
+                    drag={dragEffect} />)}
                   {panel === "zoom" && currentZoom && !currentZoom.follow && (
                     <button
                       ref={focusMarker}
@@ -2613,27 +2578,6 @@ export default function App() {
                     {panel === "webcam" && <button className="webcam-resize" aria-label="Redimensionar webcam" title="Arraste para redimensionar" onPointerDown={(e) => dragWebcam(e, true)} onKeyDown={(e) => { if (["ArrowUp", "ArrowRight", "ArrowDown", "ArrowLeft"].includes(e.key)) { e.preventDefault(); e.stopPropagation(); webcamChange({ zoomBehavior: "keep", size: clamp(currentWebcam.size + (["ArrowUp", "ArrowRight"].includes(e.key) ? .01 : -.01), .08, .6) }); } }} />}
                   </div>
                 )}
-                <div
-                  className="rendered-cursor"
-                  ref={cursor}
-                  style={{
-                    display:
-                      canEditCursor && look.cursorSize > 0 ? "block" : "none",
-                    ...cursorDimensions(
-                      selectedCursor,
-                      look.cursorSize,
-                      size.width,
-                    ),
-                  }}
-                >
-                  <img
-                    src={assetURL(selectedCursor.file)}
-                    alt=""
-                    style={{
-                      transform: `translate(${-selectedCursor.hotspotX * 100}%,${-selectedCursor.hotspotY * 100}%)`,
-                    }}
-                  />
-                </div>
                 </>
               ) : (
                 <div className="empty-preview">
@@ -2663,21 +2607,6 @@ export default function App() {
             operation === "stopping" ? (
               <div className="operation-overlay">
                 <span className="red-dot" />
-                {recordWebcam && (operation === "recording" || operation === "starting") && (
-                  <div
-                    className="recording-camera-bubble"
-                    style={{ left: `${recordingCameraPosition.x * 100}%`, top: `${recordingCameraPosition.y * 100}%`, width: `${Math.min(size.width, size.height) * 0.24}px` }}
-                    onPointerDown={recordingCameraPointerDown}
-                    onPointerMove={recordingCameraPointerMove}
-                    onPointerUp={recordingCameraPointerUp}
-                    onPointerCancel={recordingCameraPointerUp}
-                    aria-label="Prévia da webcam. Arraste para escolher a posição no vídeo."
-                    title="Arraste para escolher a posição da webcam no vídeo"
-                  >
-                    {cameraPreviewFrame ? <img src={cameraPreviewFrame} alt="Sua câmera ao vivo" /> : <span className="recording-camera-placeholder">◉</span>}
-                    <span className="recording-camera-label"><i /> Arraste para posicionar</span>
-                  </div>
-                )}
                 <strong>
                   {operation === "recording"
                     ? "Gravando o monitor principal"
@@ -2687,7 +2616,7 @@ export default function App() {
                 </strong>
                 <span className="record-clock">{clock(elapsed)}</span>
                 <p>
-                  Até 4K · 60 fps · {recordSystemAudio || recordMicrophone ? "com áudio" : "sem áudio"}.
+                  Até {captureQuality.resolution === 2160 ? "4K" : "1080p"} · {captureQuality.fps} fps · {recordSystemAudio || recordMicrophone ? "com áudio" : "sem áudio"}.
                 </p>
                 <button
                   className="light-button"
@@ -2698,16 +2627,6 @@ export default function App() {
                 </button>
               </div>
             ) : null}
-            {recordWebcam && operation === "idle" && (
-              <aside className="camera-live-preview" aria-label="Prévia ao vivo da webcam">
-                {cameraPreviewFrame ? <img src={cameraPreviewFrame} alt="Prévia ao vivo da webcam" /> : <div className="camera-preview-placeholder">◉</div>}
-                <span className="camera-preview-caption">
-                  <i className={`camera-preview-dot${cameraPreviewReady ? " ready" : ""}`} />
-                  {cameraPreviewError ? "Câmera bloqueada" : cameraPreviewReady ? "Webcam pronta" : "Aguardando acesso à câmera…"}
-                </span>
-                {cameraPreviewError && <><p className="camera-preview-error">{cameraPreviewError}</p><button className="camera-preview-settings" onClick={() => void invoke("open_camera_settings")}>Abrir permissão da câmera ↗</button><button className="camera-preview-settings" onClick={() => { setCameraPreviewError(""); void invoke("start_camera_preview", { deviceId: recordingOptions.cameraDevice }).catch((cause) => setCameraPreviewError(String(cause))); }}>Tentar novamente</button></>}
-              </aside>
-            )}
           </div>
           <div className="transport">
             <span className="timecode">{clock(editedTime)}</span>
@@ -2766,6 +2685,8 @@ export default function App() {
               ["cursor", "Cursor"],
               ["animations", "Animações"],
               ["audio", "Áudio"],
+              ["effect", "Anotações"],
+              ["pacing", "Ritmo"],
               ["webcam", "Webcam"],
             ] as const
           ).map(([key, label]) => (
@@ -3288,7 +3209,9 @@ export default function App() {
                       registradas durante uma nova gravação.
                     </p>
                   )}
-                  <Range
+                  <label className="switch-label">Ocultar cursor parado<input type="checkbox" checked={look.hideIdleCursor ?? false} onChange={event => appearance({ hideIdleCursor: event.target.checked })} /></label>
+                <label className="capture-device-select"><span>Efeito de clique</span><select aria-label="Efeito de clique" value={look.clickEffect ?? "none"} onChange={event => appearance({ clickEffect: event.target.value as Appearance["clickEffect"] })}><option value="none">Nenhum</option><option value="circle">Círculo</option><option value="ripple">Onda</option></select></label>
+                <Range
                     label="Tamanho"
                     min={0}
                     max={64}
@@ -3371,6 +3294,24 @@ export default function App() {
                 <button className="wide subtle" onClick={() => appearance({ cameraMotion: { ...motionPresets.smooth, impacts: cameraMotion.impacts, spring: false, shake: false, blur: false } })}>Desativar Camera Motion</button>
                 <h3 id="cursor-animation-label">Animação do cursor</h3>
                 <fieldset disabled={!canEditCursor}>
+                  <label className="capture-device-select"><span>Resposta ao movimento</span>
+                    <select aria-label="Resposta ao movimento" value={cursorResponse.style} onChange={event => appearance({ cursorResponse: { ...cursorResponse, style: event.target.value as typeof cursorResponse.style } })}>
+                      <option value="off">Desligada</option><option value="smooth">Suave</option><option value="cinematic">Cinematic</option><option value="dynamic">Dynamic</option>
+                    </select>
+                  </label>
+                  <fieldset disabled={cursorResponse.style === "off"}>
+                    <Range label="Intensidade do shake do cursor" min={0} max={100} suffix="%" value={cursorResponse.intensity * 100} onChange={value => appearance({ cursorResponse: { ...cursorResponse, intensity: value / 100 } })} />
+                    <label className="switch-label">Impacto ao mudar de direção<input type="checkbox" checked={cursorResponse.directionImpact} onChange={event => appearance({ cursorResponse: { ...cursorResponse, directionImpact: event.target.checked } })} /></label>
+                  </fieldset>
+                  <label className="capture-device-select"><span>Acompanhar cursor</span>
+                    <select aria-label="Acompanhar cursor" value={look.cursorFollow ?? "balanced"} onChange={event => appearance({ cursorFollow: event.target.value as Appearance["cursorFollow"] })}>
+                      <option value="off">Desligado</option><option value="balanced">Equilibrado</option><option value="close">Próximo</option>
+                    </select>
+                  </label>
+                  <fieldset disabled={look.cursorFollow === "off"}>
+                    <Range label="Antecipação do zoom" min={0} max={35} suffix="%" value={(look.zoomAnticipation ?? .35) * 100} onChange={value => appearance({ zoomAnticipation: value / 100 })} />
+                  </fieldset>
+                  <p className="help">Cliques preservados sempre. O shake acompanha a direção e a velocidade e desaparece ao parar. O modo Original do trecho usa a posição gravada.</p>
                   <div
                     className="motion-options cursor-motion-options"
                     role="group"
@@ -3466,10 +3407,12 @@ export default function App() {
                   <h2>Webcam</h2>
                   <span>Sobreposição na gravação</span>
                 </div>
-                {windowsDesktop && <>
+                {desktop && <>
                   <DeviceSelect label="Webcam para gravar" value={recordingOptions.cameraDevice} devices={recordingDevices.cameras} disabled={busy || devicesLoading} onChange={cameraDevice => setRecordingOptions(options => ({ ...options, cameraDevice }))} />
                   <button className="wide subtle" disabled={busy || devicesLoading} onClick={() => void refreshDevices()}>{devicesLoading ? "Buscando dispositivos…" : "Atualizar dispositivos"}</button>
                   {devicesError && <p className="help capture-device-error" role="alert">{devicesError}</p>}
+                  {recordWebcam && <p className="help">A prévia está em uma janela flutuante, excluída da captura da tela. Arrastá-la não altera a posição da webcam no vídeo.</p>}
+                  {cameraPreviewError && <p className="help" role="alert">{cameraPreviewError}</p>}
                 </>}
                 {project?.webcam ? (
                   <>
@@ -3578,6 +3521,22 @@ export default function App() {
                 )}
               </>
             )}
+            {panel === "pacing" && <>
+              <div className="panel-title"><h2>Ritmo</h2><span>Sugestões locais, editáveis e reversíveis</span></div>
+              <button className="wide subtle" disabled={analyzing || !media || (!media.hasAudio && !project?.microphone)} onClick={() => void suggestPacing("silence")}>{analyzing ? "Analisando…" : "Detectar silêncios"}</button>
+              <button className="wide subtle" disabled={analyzing || !media?.cursor.some(point => point.typing)} onClick={() => void suggestPacing("typing")}>Acelerar digitação para 2×</button>
+              <p className="help">Silêncios abaixo de −38 dB por pelo menos 0,8 s preservam 150 ms em cada borda. A análise usa o microfone quando disponível. Ouça os intervalos antes de aplicar.</p>
+              {analysis && <svg className="audio-waveform" viewBox="0 0 200 50" role="img" aria-label="Forma de onda do áudio">{Array.from({ length: 100 }, (_, i) => {
+                const chunk = analysis.levels.slice(Math.floor(i * analysis.levels.length / 100), Math.max(Math.floor((i + 1) * analysis.levels.length / 100), Math.floor(i * analysis.levels.length / 100) + 1));
+                const peak = Math.max(0, ...chunk), height = Math.max(1, Math.min(48, peak * 150));
+                return <rect key={i} x={i * 2} y={25 - height / 2} width={1} height={height} fill="#ad91ff" />;
+              })}</svg>}
+              <div className="pacing-suggestions">{suggestions.map((suggestion, index) => <div key={index}>
+                <label><input type="checkbox" checked={includedSuggestions.includes(index)} onChange={event => setIncludedSuggestions(current => event.target.checked ? [...current, index] : current.filter(i => i !== index))} />{suggestion.kind === "silence" ? "Remover" : "2×"} · {clock(suggestion.start)}–{clock(suggestion.end)}</label>
+                <button onClick={() => seek(suggestion.start)}>Ouvir / ver</button>
+              </div>)}</div>
+              {!!suggestions.length && <button className="wide export-button" disabled={!includedSuggestions.length} onClick={applyPacing}>Aplicar {includedSuggestions.length} sugestões</button>}
+            </>}
             {panel === "audio" && (
               <>
                 <div className="panel-title">
@@ -3705,40 +3664,24 @@ export default function App() {
             {panel === "effect" && (
               <div className="panel-title">
                 <h2>
-                  {currentEffect?.kind === "mask" ? "Máscara" : "Destaque"}
+                  {currentEffect ? effectLabels[currentEffect.kind] : "Anotações"}
                 </h2>
                 <span>Área e duração do efeito</span>
+                <button className="wide subtle" onClick={() => void importSubtitles()}>Importar legendas SRT</button>
               </div>
             )}
             {panel === "effect" && !currentEffect && (
               <p className="help">
-                Selecione uma faixa de máscara ou destaque na timeline.
+                Selecione uma anotação na timeline.
               </p>
             )}
             {panel === "effect" && currentEffect && (
               <>
-                <div
-                  className="segmented"
-                  role="group"
-                  aria-label="Tipo de efeito"
-                >
-                  <button
-                    className={currentEffect.kind === "mask" ? "active" : ""}
-                    aria-pressed={currentEffect.kind === "mask"}
-                    onClick={() => effectChange({ kind: "mask" })}
-                  >
-                    Desfocar
-                  </button>
-                  <button
-                    className={
-                      currentEffect.kind === "highlight" ? "active" : ""
-                    }
-                    aria-pressed={currentEffect.kind === "highlight"}
-                    onClick={() => effectChange({ kind: "highlight" })}
-                  >
-                    Destacar
-                  </button>
-                </div>
+                <label className="capture-device-select"><span>Tipo de anotação</span><select aria-label="Tipo de anotação" value={currentEffect.kind} onChange={event => effectChange({ kind: event.target.value as Effect["kind"] })}>
+                  {Object.entries(effectLabels).map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}
+                </select></label>
+                {["text", "caption", "watermark"].includes(currentEffect.kind) && <label className="annotation-text">Texto<textarea maxLength={500} value={currentEffect.text ?? "Seu texto"} onChange={event => effectChange({ text: event.target.value })} /></label>}
+                {graphicEffect(currentEffect.kind) && <label className="custom-color">Cor<input type="color" value={currentEffect.color ?? "#ffd55d"} onChange={event => effectChange({ color: event.target.value })} /></label>}
                 <p className="help">
                   Arraste a área no vídeo para mover e use a alça para
                   redimensionar. A posição fica fixa no quadro enquanto a câmera
@@ -3770,7 +3713,7 @@ export default function App() {
                     })
                   }
                 />
-                {currentEffect.kind === "highlight" && (
+                {currentEffect.kind !== "mask" && currentEffect.kind !== "magnifier" && (
                   <Range
                     label="Opacidade"
                     min={10}
@@ -3973,6 +3916,10 @@ export default function App() {
             >
               ✦ Destacar
             </button>
+            <select aria-label="Adicionar anotação" value="" disabled={!project || busy || !media} onChange={event => addEffect(event.target.value as Effect["kind"])}>
+              <option value="" disabled>＋ Anotação</option>
+              {Object.entries(effectLabels).filter(([kind]) => !["mask", "highlight"].includes(kind)).map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}
+            </select>
             <button
               disabled={busy || (!selected && selectedClip === null && !selectedEffect && !webcamKeyed)}
               onClick={deleteSelection}
@@ -4079,7 +4026,7 @@ export default function App() {
               </div>
             )}
           </div>
-          <div className="effect-track" aria-label="Máscaras e destaques">
+          <div className="effect-track" aria-label="Anotações e efeitos">
             {project?.effects?.map((effect) => (
               <button
                 key={effect.id}
@@ -4095,7 +4042,7 @@ export default function App() {
                   setPanel("effect");
                   seek(effect.start);
                 }}
-                title={`${effect.kind === "mask" ? "Desfoque" : "Destaque"} · ${clock(effect.start)}–${clock(effect.end)}`}
+                title={`${effectLabels[effect.kind]} · ${clock(effect.start)}–${clock(effect.end)}`}
               >
                 {effect.kind === "mask" ? "▧" : "✦"}{" "}
                 {clock(effect.end - effect.start)}

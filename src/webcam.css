@@ -5,3 +5,15 @@
 .webcam-resize{position:absolute;right:-6px;bottom:-6px;width:15px;height:15px;min-width:15px;padding:0;border:2px solid #fff;border-radius:4px;background:#875cff;cursor:nwse-resize;box-shadow:0 1px 5px #0008;z-index:2}
 .webcam-frame.editing::after{content:'';position:absolute;inset:-3px;border:1px dashed #b59aff;border-radius:inherit;pointer-events:none}
 .camera-corners{display:grid;grid-template-columns:repeat(3,1fr)}
+.floating-webcam-page,.floating-webcam-page #root{margin:0;width:100%;height:100%;overflow:hidden;background:#111116}
+.floating-webcam{display:flex;flex-direction:column;width:100vw;height:100vh;box-sizing:border-box;border:1px solid #ffffff25;background:#111116;color:#eee;font:12px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.floating-webcam header{display:flex;min-height:32px;align-items:center;background:#1d1d25}
+.floating-webcam button{border:0;background:transparent;color:inherit;padding:7px 10px;cursor:pointer;font:inherit}
+.floating-webcam button:focus-visible,.floating-webcam select:focus-visible{outline:2px solid #bb9cff;outline-offset:-3px}
+.floating-webcam .floating-webcam-drag{display:flex;align-items:center;gap:7px;flex:1;align-self:stretch;text-align:left;cursor:grab;touch-action:none}
+.floating-webcam-drag i{width:7px;height:7px;border-radius:50%;background:#61d59c}.floating-webcam-drag i.recording{background:#ff626b}
+.floating-webcam-image{position:relative;flex:1;min-height:0;display:grid;place-items:center;background:#09090d;overflow:hidden}
+.floating-webcam-image>img{width:100%;height:100%;object-fit:contain;min-height:0;user-select:none}.floating-webcam-image>span{font-size:36px;color:#888}
+.floating-webcam-error{position:absolute;inset:0;overflow:auto;padding:10px;background:#17131df2;font-size:11px}.floating-webcam-error p{margin:0 0 8px;line-height:1.4}.floating-webcam-error button{display:block;color:#d1b7ff;padding:4px 0}
+.floating-webcam footer{display:flex;flex-direction:column;gap:4px;padding:5px 14px 7px 8px}.floating-webcam footer select{max-width:100%;min-width:0;background:#22222c;color:#eee;border:1px solid #ffffff25;border-radius:4px;font:inherit;padding:3px}.floating-webcam footer small{font-size:9px;color:#b3afbd}.floating-webcam footer button{text-align:left;padding:2px;color:#ff9caa}
+.floating-webcam .floating-webcam-resize{position:absolute;right:0;bottom:0;padding:0 3px;cursor:nwse-resize;color:#999}

@@ -1,5 +1,10 @@
 # Estado das entregas — 21/10/2026
 
+## Atualização — 25/10/2026
+
+A execução do plano combinado com FocuSee entregou seleção de monitor/janela/área, anotações, SRT, marca d’água, sugestões revisáveis de ritmo, efeitos/ocultação do cursor, recentes/recuperação e exportação HEVC/ProRes com qualidade configurável. O estado atual, limites e pendências ficam em [PLANO-FRAME-STUDIO-FOCUSEE.md](PLANO-FRAME-STUDIO-FOCUSEE.md). As seções seguintes preservam o histórico de 21/10.
+
+
 Todas as cinco partes receberam uma primeira implementação. Isso ainda não significa paridade completa com o Screen Studio.
 
 | Parte | Implementado | Validação | Próximo trabalho |

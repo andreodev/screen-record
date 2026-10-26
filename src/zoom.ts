@@ -1,11 +1,11 @@
-import type { CameraMotion } from "./cinematic.ts";
+import type { CameraMotion, CursorResponse } from "./cinematic.ts";
 export type Point = { x: number; y: number };
 export type CursorEvent = Point & { t: number; down: boolean; rightDown?: boolean; middleDown?: boolean; kind?: string; typing?: boolean };
 export type Zoom = Point & { id: string; start: number; end: number; scale: number; enabled: boolean; follow?: boolean; instant?: boolean; manualOverride?: boolean; roiWidth?: number; roiHeight?: number };
 export type Camera = Point & { scale: number };
 export type CameraKey = Camera & { t: number; cut?: boolean };
 export type CameraFrame = { left: number; top: number; width: number; height: number };
-export type Appearance = { background: number; padding: number; radius: number; shadow: number; cursorSize: number; smooth: boolean; aspect: string; cropFill?: boolean; cropFollowCursor?: boolean; cameraMode?: "auto" | "manual" | "hybrid"; backgroundMode?: "gradient" | "color" | "wallpaper" | "video-blur"; colors?: [string, string]; cursorSmooth?: boolean; wallpaper?: string; cursorAsset?: string; cursorTheme?: string; backgroundBlur?: number; cursorMotion?: "original" | "smooth" | "medium" | "rapid"; cameraSpring?: boolean; cameraMotion?: CameraMotion; motionBlur?: { cursor: number; zoom: number; pan: number }; clickSounds?: boolean; clickSoundVolume?: number };
+export type Appearance = { background: number; padding: number; radius: number; shadow: number; cursorSize: number; smooth: boolean; aspect: string; cropFill?: boolean; cropFollowCursor?: boolean; cameraMode?: "auto" | "manual" | "hybrid"; backgroundMode?: "gradient" | "color" | "wallpaper" | "video-blur"; colors?: [string, string]; cursorSmooth?: boolean; wallpaper?: string; cursorAsset?: string; cursorTheme?: string; backgroundBlur?: number; cursorMotion?: "original" | "smooth" | "medium" | "rapid"; cameraSpring?: boolean; cameraMotion?: CameraMotion; cursorResponse?: CursorResponse; cursorFollow?: "off" | "balanced" | "close"; zoomAnticipation?: number; motionBlur?: { cursor: number; zoom: number; pan: number }; hideIdleCursor?: boolean; clickEffect?: "none" | "circle" | "ripple"; clickSounds?: boolean; clickSoundVolume?: number };
 export function cursorMotionFor(appearance: Appearance): NonNullable<Appearance["cursorMotion"]> {
   return appearance.cursorMotion ?? (appearance.cursorSmooth === false ? "original" : "medium");
 }
@@ -13,7 +13,7 @@ export const backgrounds = [
   ["#25243d", "#7c6a9e"], ["#112e3b", "#45a7ac"], ["#512e53", "#eb9a89"],
   ["#182b33", "#538367"], ["#171719", "#35353c"], ["#6b3e81", "#d574ae"],
 ];
-export const defaults: Appearance = { background: 0, padding: 9, radius: 12, shadow: 35, cursorSize: 24, cursorTheme: "macos", smooth: true, aspect: "auto", cameraMode: "hybrid", clickSounds: true, clickSoundVolume: 0.3 };
+export const defaults: Appearance = { background: 0, padding: 9, radius: 12, shadow: 35, cursorSize: 24, cursorTheme: "macos", smooth: true, aspect: "auto", cameraMode: "hybrid", cursorResponse: { style: "cinematic", intensity: 1, directionImpact: true }, cursorFollow: "balanced", zoomAnticipation: .3, clickSounds: true, clickSoundVolume: 0.3 };
 export const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 /** Maps the complete recording layer into the final canvas around a source-space focus point. */
 export function cameraFrame(camera: Camera, frameWidth: number, frameHeight: number, canvasWidth: number, canvasHeight: number): CameraFrame {
@@ -120,11 +120,14 @@ export function zoomsForMode(zooms: Zoom[], mode: NonNullable<Appearance["camera
   if (mode === "manual") return zooms.filter(zoom => !isAutoZoom(zoom));
   return [...zooms.filter(isAutoZoom), ...zooms.filter(zoom => !isAutoZoom(zoom))];
 }
-export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, events: CursorEvent[] = [], spring = false, spanX = 1, spanY = 1, followCropCursor = false, _shake = false, sourceAspect = 16 / 9, outputAspect = sourceAspect, dampingRatio?: number): CameraKey[] {
+export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, events: CursorEvent[] = [], spring = false, spanX = 1, spanY = 1, followCropCursor = false, _shake = false, sourceAspect = 16 / 9, outputAspect = sourceAspect, dampingRatio?: number, follow: Pick<Appearance, "cursorFollow" | "zoomAnticipation"> = {}): CameraKey[] {
   const result: CameraKey[] = [];
   const instantTimes = new Set<number>();
   const scheduled = zooms.map((zoom, index) => ({ zoom: { ...zoom }, index, focus: { x: zoom.x, y: zoom.y } }))
     .filter(({ zoom }) => zoom.enabled && zoom.end > zoom.start).sort((a, b) => a.zoom.start - b.zoom.start);
+  if (follow.cursorFollow === "off") for (const item of scheduled) item.zoom.follow = false;
+  const closeFollow = follow.cursorFollow === "close", anticipation = clamp(follow.zoomAnticipation ?? .35, 0, .35);
+  const safePoints = new Map<number, CursorEvent>();
   // Bridge short gaps between auto focus blocks. Nearby blocks in one area become a single held scene;
   // a change of area overlaps briefly so the camera pans directly instead of returning to overview.
   for (let i = 1; i < scheduled.length; i++) {
@@ -172,9 +175,13 @@ export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, eve
     for (const item of active) {
       let zoom = item.zoom;
       if (zoom.follow && point) {
-      const zoneX = .12 * cameraSpanX(zoom.scale), zoneY = .12 * cameraSpanY(zoom.scale);
-        const dx = point.x - item.focus.x, dy = point.y - item.focus.y;
-        const followAlpha = 1 - Math.exp(-Math.max(0, t - previousFrameTime) / (smooth ? .2 : .1));
+        // Anticipation keeps fast cursor moves away from the zoomed frame's edge.
+        const nextPoint = cursorAt(t + (smooth ? .12 : .08), events);
+        const lead = nextPoint ? anticipation : 0;
+        const targetPoint = nextPoint ? { x: clamp(point.x + (nextPoint.x - point.x) * lead, 0, 1), y: clamp(point.y + (nextPoint.y - point.y) * lead, 0, 1) } : point;
+        const zoneX = (closeFollow ? .08 : .1) * cameraSpanX(zoom.scale), zoneY = (closeFollow ? .08 : .1) * cameraSpanY(zoom.scale);
+        const dx = targetPoint.x - item.focus.x, dy = targetPoint.y - item.focus.y;
+        const followAlpha = 1 - Math.exp(-Math.max(0, t - previousFrameTime) / (closeFollow ? .08 : smooth ? .16 : .09));
         item.focus.x += Math.sign(dx) * Math.max(0, Math.abs(dx) - zoneX) * followAlpha;
         item.focus.y += Math.sign(dy) * Math.max(0, Math.abs(dy) - zoneY) * followAlpha;
         zoom = { ...zoom, ...item.focus };
@@ -185,19 +192,25 @@ export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, eve
       );
       // Portrait auto scenes first reach the exact cover scale implied by the
       // fitted frame. This is derived from geometry, not a visual multiplier.
-      const scale = isAutoZoom(zoom) && outputAspect < 1
+      let scale = isAutoZoom(zoom) && outputAspect < 1
         ? Math.max(zoom.scale, roiScale, coverageScale)
         : isAutoZoom(zoom) ? Math.min(1.4, zoom.scale) : clamp(zoom.scale, 1, 3);
+      if (isAutoZoom(zoom) && zoom.follow && point) {
+        const travel = Math.hypot((point.x - cameraState.x) / cameraSpanX(scale), (point.y - cameraState.y) / cameraSpanY(scale));
+        scale = Math.max(outputAspect < 1 ? coverageScale : 1, scale / (1 + clamp((travel - .32) * .6, 0, .25)));
+      }
       const halfX = cameraSpanX(scale) / 2, halfY = cameraSpanY(scale) / 2;
       target = { x: clamp(zoom.x, halfX, 1 - halfX), y: clamp(zoom.y, halfY, 1 - halfY), scale };
       if (zoom.instant) cameraState = target;
     }
+    const top = active[active.length - 1];
+    if (top?.zoom.follow && isAutoZoom(top.zoom) && point) safePoints.set(t, point);
     // In vertical output, returning to scale 1 after each automatic block makes
     // a landscape source collapse back to a short, letterboxed strip. Keep the
     // last focused composition through gaps; a manual scale-1 segment can still
     // deliberately create an overview.
     if (!active.length && holdVerticalAutoFrame && hasFocusedVerticalScene) target = { ...cameraState };
-    if (followCropCursor && (spanX < .999 || spanY < .999)) {
+    if (followCropCursor && follow.cursorFollow !== "off" && (spanX < .999 || spanY < .999)) {
       if (active.length) { cropX = target.x; cropY = target.y; }
       else {
         const point = cursorAt(t, events), dt = t - previousFrameTime;
@@ -240,7 +253,8 @@ export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, eve
         value = { x: key.x, y: key.y, scale: key.scale }; velocity = { x: 0, y: 0, scale: 0 }; continue;
       }
       for (let sub = 0; sub < 4; sub++) for (const prop of ["x", "y", "scale"] as const) {
-        const acceleration = (stiffness * (key[prop] - value[prop]) - damping * velocity[prop]) / mass;
+        const limit = prop === "scale" ? 6 : 4;
+        const acceleration = clamp((stiffness * (key[prop] - value[prop]) - damping * velocity[prop]) / mass, -limit, limit);
         velocity[prop] += acceleration * dt / 4; value[prop] += velocity[prop] * dt / 4;
       }
       value.scale = clamp(value.scale, 1, Math.max(3, coverageScale));
@@ -248,12 +262,26 @@ export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, eve
       key.x = clamp(value.x, halfX, 1 - halfX); key.y = clamp(value.y, halfY, 1 - halfY); key.scale = value.scale;
     }
   }
+  // Project the followed subject into the safe window after the spring settles.
+  for (const key of result) {
+    const point = safePoints.get(key.t);
+    if (!point) continue;
+    const sx = cameraSpanX(key.scale), sy = cameraSpanY(key.scale);
+    key.x = clamp(clamp(key.x, point.x - sx * .4, point.x + sx * .4), sx / 2, 1 - sx / 2);
+    key.y = clamp(clamp(key.y, point.y - sy * .4, point.y + sy * .4), sy / 2, 1 - sy / 2);
+  }
   return result;
 }
 
+export function cursorAnchors(events: CursorEvent[]): number[] {
+  return events.filter((e, i) => {
+    const previous = events[i - 1];
+    return previous ? e.down !== previous.down || !!e.rightDown !== !!previous.rightDown || !!e.middleDown !== !!previous.middleDown : e.down || e.rightDown || e.middleDown;
+  }).map(e => e.t);
+}
 // Offline smoothing narrows its window near clicks to preserve their exact position.
 export function smoothCursor(events: CursorEvent[], windowSeconds = .065): CursorEvent[] {
-  const clicks = events.filter((e, i) => e.down && (i === 0 || !events[i - 1].down)).map(e => e.t);
+  const clicks = cursorAnchors(events);
   let click = 0, first = 0, last = 0;
   return events.map(e => {
     while (click < clicks.length && clicks[click] < e.t) click++;

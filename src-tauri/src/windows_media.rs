@@ -2,6 +2,7 @@
 //! the same newline-delimited JSON protocol as the macOS helper.
 mod audio;
 mod render;
+mod sources;
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -41,6 +42,7 @@ fn dispatch(args: &[String]) -> Result<()> {
             .ok_or_else(|| "Argumento de mídia ausente.".into())
     };
     match args.first().map(String::as_str) {
+        Some("sources") => { emit(sources::list()?); Ok(()) }
         Some("devices") => {
             let (outputs, inputs) = audio::devices()?;
             emit(
@@ -48,6 +50,7 @@ fn dispatch(args: &[String]) -> Result<()> {
             );
             Ok(())
         }
+        Some("analyze-audio") => analyze_audio(Path::new(arg(1)?)),
         Some("inspect") => emit_media(Path::new(arg(1)?)),
         Some("preview") => {
             let destination = Path::new(arg(2)?).join("QuickLook/Preview.png");
@@ -118,6 +121,25 @@ fn ffmpeg() -> Result<Command> {
         .creation_flags(0x08000000)
         .args(["-hide_banner", "-loglevel", "error"]);
     Ok(command)
+}
+fn analyze_audio(path: &Path) -> Result<()> {
+    let mut command = ffmpeg()?;
+    command.args(["-nostdin", "-i"]).arg(path).args(["-map", "0:a:0", "-vn", "-ac", "1", "-ar", "8000", "-f", "f32le", "pipe:1"]).stdout(Stdio::piped()).stdin(Stdio::null());
+    let mut process = Process::spawn(&mut command)?;
+    let mut output = BufReader::new(process.child.stdout.take().ok_or("Áudio indisponível.")?);
+    let mut levels = Vec::new(); let mut count = 0usize; let mut sum = 0f64; let mut samples = 0usize;
+    loop {
+        let mut raw = [0u8; 4];
+        match output.read_exact(&mut raw) { Ok(()) => {}, Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => break, Err(error) => return Err(error.into()) }
+        let value = f32::from_le_bytes(raw) as f64;
+        sum += if value.is_finite() { value * value } else { 0. }; count += 1; samples += 1;
+        if count == 800 { levels.push((sum / count as f64).sqrt()); count = 0; sum = 0.; }
+        if samples > 8000 * 14400 { return Err("A análise aceita áudio de até 4 horas.".into()); }
+    }
+    process.finish()?;
+    if count > 0 { levels.push((sum / count as f64).sqrt()); }
+    if samples == 0 { return Err("Nenhum áudio encontrado para analisar.".into()); }
+    emit(json!({"event":"analysis","step":0.1,"levels":levels,"duration":samples as f64 / 8000.})); Ok(())
 }
 fn check_output(output: std::process::Output) -> Result<Vec<u8>> {
     if !output.status.success() {
@@ -526,14 +548,11 @@ fn record(path: &Path, webcam: Option<&Path>, system_audio: bool, microphone: bo
         .transpose()?
         .unwrap_or_default();
     options.validate()?;
-    let width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
-    let height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
-    if width <= 0 || height <= 0 {
-        return Err("Monitor principal indisponível.".into());
-    }
-    let scale = (3840. / width.max(height) as f64)
-        .min(2160. / width.min(height) as f64)
-        .min(1.);
+    let mut region = sources::region(&options)?;
+    let width = region.width; let height = region.height;
+    let resolution = options.resolution.unwrap_or(2160) as f64;
+    let fps = options.fps.unwrap_or(60);
+    let scale = (resolution * 16. / 9. / width.max(height) as f64).min(resolution / width.min(height) as f64).min(1.);
     let out_width = ((width as f64 * scale / 2.).floor() as u32 * 2).max(2);
     let out_height = ((height as f64 * scale / 2.).floor() as u32 * 2).max(2);
     let mut camera_input = if webcam.is_some() {
@@ -548,26 +567,9 @@ fn record(path: &Path, webcam: Option<&Path>, system_audio: bool, microphone: bo
         audio::RecordingAudio::start(path, system_audio, microphone, start.clone(), &options)?;
     let capture = path.with_extension("capture.mov");
     let mut command = ffmpeg()?;
-    command
-        .args([
-            "-stats_period",
-            "0.1",
-            "-progress",
-            "pipe:1",
-            "-f",
-            "gdigrab",
-            "-framerate",
-            "60",
-            "-draw_mouse",
-            "0",
-            "-offset_x",
-            "0",
-            "-offset_y",
-            "0",
-            "-video_size",
-        ])
-        .arg(format!("{width}x{height}"))
-        .args(["-i", "desktop", "-vf"])
+    command.args(["-stats_period", "0.1", "-progress", "pipe:1", "-f", "gdigrab", "-framerate"]).arg(fps.to_string()).args(["-draw_mouse", "0"]);
+    if region.input == "desktop" { command.arg("-offset_x").arg(region.x.to_string()).arg("-offset_y").arg(region.y.to_string()); }
+    command.arg("-video_size").arg(format!("{width}x{height}")).arg("-i").arg(&region.input).arg("-vf")
         .arg(format!("scale={out_width}:{out_height}"))
         .args([
             "-c:v",
@@ -698,10 +700,11 @@ fn record(path: &Path, webcam: Option<&Path>, system_audio: bool, microphone: bo
                 GetCursorInfo(&mut info);
             }
             let pressed = |key: u16| unsafe { GetAsyncKeyState(key as i32) < 0 };
+            region.update();
             events.push(Pointer {
                 t: now.elapsed().as_secs_f64(),
-                x: (point.x as f64 / width as f64).clamp(0., 1.),
-                y: (point.y as f64 / height as f64).clamp(0., 1.),
+                x: ((point.x - region.x) as f64 / width as f64).clamp(0., 1.),
+                y: ((point.y - region.y) as f64 / height as f64).clamp(0., 1.),
                 down: pressed(VK_LBUTTON),
                 right_down: pressed(VK_RBUTTON),
                 middle_down: pressed(VK_MBUTTON),

@@ -1,11 +1,15 @@
 use super::*;
 use image::{RgbaImage, imageops};
 use std::collections::HashMap;
-use tiny_skia::{FillRule, Mask, Paint, PathBuilder, Pixmap, PixmapPaint, Transform};
+use tiny_skia::{FillRule, Mask, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, Transform};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Job {
+    #[serde(default)]
+    codec: Option<String>,
+    #[serde(default)]
+    quality: Option<String>,
     source: PathBuf,
     destination: PathBuf,
     start: f64,
@@ -23,6 +27,10 @@ struct Job {
     ranges: Option<Vec<Clip>>,
     #[serde(default)]
     effects: Vec<Value>,
+    #[serde(default)]
+    annotation_images: HashMap<String, String>,
+    #[serde(default)]
+    cursor_activity: Vec<f64>,
     background_audio: Option<Value>,
     microphone: Option<Value>,
     webcam: Option<Value>,
@@ -80,39 +88,21 @@ pub(super) fn export(path: &Path) -> Result<()> {
         value_str(&job.appearance, "aspect", "auto"),
     );
     let work = WorkDir::new(job.destination.parent().ok_or("Destino inválido.")?)?;
-    let silent = work.0.join("video.mp4");
+    let codec = job.codec.as_deref().unwrap_or("h264"); let quality = job.quality.as_deref().unwrap_or("high");
+    if !["h264", "hevc", "prores-lt", "prores", "prores-hq", "prores-4444"].contains(&codec) || !["web", "balanced", "high"].contains(&quality) { return Err("Codec ou qualidade inválidos.".into()); }
+    let extension = if codec.starts_with("prores") { "mov" } else { "mp4" };
+    let silent = work.0.join(format!("video.{extension}"));
     let mut renderer = Renderer::new(&job, sw, sh, width, height)?;
     let mut encoder_command = ffmpeg()?;
-    encoder_command
-        .args(["-f", "rawvideo", "-pixel_format", "rgba", "-video_size"])
-        .arg(format!("{width}x{height}"))
-        .arg("-framerate")
-        .arg(job.fps.to_string())
-        .args([
-            "-i",
-            "pipe:0",
-            "-an",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "fast",
-            "-crf",
-            "18",
-            "-pix_fmt",
-            "yuv420p",
-            "-color_primaries",
-            "bt709",
-            "-color_trc",
-            "bt709",
-            "-colorspace",
-            "bt709",
-            "-movflags",
-            "+faststart",
-            "-y",
-        ])
-        .arg(&silent)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null());
+    encoder_command.args(["-f", "rawvideo", "-pixel_format", "rgba", "-video_size"]).arg(format!("{width}x{height}")).arg("-framerate").arg(job.fps.to_string()).args(["-i", "pipe:0", "-an"]);
+    if codec.starts_with("prores") {
+        let profile = match codec { "prores-lt" => "1", "prores-hq" => "3", "prores-4444" => "4", _ => "2" };
+        encoder_command.args(["-c:v", "prores_ks", "-profile:v", profile, "-pix_fmt", if codec == "prores-4444" { "yuva444p10le" } else { "yuv422p10le" }]);
+    } else {
+        encoder_command.args(["-c:v", if codec == "hevc" { "libx265" } else { "libx264" }, "-preset", "fast", "-crf", match quality { "web" => "26", "balanced" => "22", _ => "18" }, "-pix_fmt", "yuv420p"]);
+        if codec == "hevc" { encoder_command.args(["-tag:v", "hvc1"]); }
+    }
+    encoder_command.args(["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-movflags", "+faststart", "-y"]).arg(&silent).stdin(Stdio::piped()).stdout(Stdio::null());
     let mut encoder = Process::spawn(&mut encoder_command)?;
     let mut writer = encoder.child.stdin.take().unwrap();
     let mut offset = 0.;
@@ -177,7 +167,7 @@ pub(super) fn export(path: &Path) -> Result<()> {
         &work.0,
         &cancel,
     )?;
-    let final_path = work.0.join("finished.mp4");
+    let final_path = work.0.join(format!("finished.{extension}"));
     let mut mux = ffmpeg()?;
     mux.args(["-nostdin", "-i"]).arg(&silent);
     if let Some(audio) = &audio {
@@ -329,6 +319,8 @@ struct Renderer {
     background: Pixmap,
     cursors: HashMap<String, (Pixmap, f64, f64, f64)>,
     cuts: Vec<f64>,
+    annotations: HashMap<String, Pixmap>,
+    clicks: Vec<Pointer>,
 }
 impl Renderer {
     fn new(job: &Job, sw: u32, sh: u32, width: u32, height: u32) -> Result<Self> {
@@ -443,7 +435,28 @@ impl Renderer {
                 ),
             );
         }
+        let mut annotations = HashMap::new();
+        for (id, encoded) in &job.annotation_images {
+            use base64::Engine;
+            if encoded.len() > 4_000_000 { return Err("Imagem de anotação muito grande.".into()); }
+            let data = base64::engine::general_purpose::STANDARD.decode(encoded)?;
+            let reader = image::ImageReader::with_format(std::io::Cursor::new(&data), image::ImageFormat::Png);
+            let (width, height) = reader.into_dimensions()?;
+            if width == 0 || height == 0 || width > 4096 || height > 4096 || width as u64 * height as u64 > 8_000_000 { return Err("Dimensões de anotação inválidas.".into()); }
+            let image = Pixmap::decode_png(&data)?;
+            annotations.insert(id.clone(), image);
+        }
+        for effect in &job.effects {
+            if ["text", "arrow", "rectangle", "ellipse", "caption", "watermark"].contains(&value_str(effect, "kind", "")) && !annotations.contains_key(value_str(effect, "id", "")) { return Err("Imagem de anotação ausente.".into()); }
+        }
+        let mut clicks = Vec::new(); let mut pressed = false;
+        for point in if job.raw_cursor.is_empty() { &job.cursor } else { &job.raw_cursor } {
+            let down = point.down || point.right_down || point.middle_down;
+            if down && !pressed { clicks.push(point.clone()); } pressed = down;
+        }
         Ok(Self {
+            clicks,
+            annotations,
             width,
             height,
             sw,
@@ -530,8 +543,10 @@ impl Renderer {
             }
             let mut p = point.clone();
             if let (Some(p), Some(old)) = (&mut p, pointer(sample, events)) {
-                p.x = mix(p.x, old.x, bc);
-                p.y = mix(p.y, old.y, bc);
+                if !p.down && !p.right_down && !p.middle_down {
+                    p.x = mix(p.x, old.x, bc);
+                    p.y = mix(p.y, old.y, bc);
+                }
             }
             layer.fill(tiny_skia::Color::TRANSPARENT);
             let tx = w / 2. - cam.x * self.vw * cam.scale;
@@ -556,6 +571,9 @@ impl Renderer {
                         .as_deref()
                         .filter(|k| self.cursors.contains_key(*k))
                         .unwrap_or("pointer")];
+                    let index = job.cursor_activity.partition_point(|t| *t <= time);
+                    let last = if index > 0 { job.cursor_activity[index - 1] } else { 0. };
+                    let opacity = if a["hideIdleCursor"] == true { (1. - (time - last - 1.) / 0.2).clamp(0., 1.) as f32 } else { 1. };
                     let s = value_number(a, "cursorSize", 24.) * w / 1000. * cam.scale / visible;
                     let cx = tx + p.x * self.vw * cam.scale - hx * cursor.width() as f64 * s;
                     let cy = ty + p.y * self.vh * cam.scale - hy * cursor.height() as f64 * s;
@@ -564,6 +582,7 @@ impl Renderer {
                         0,
                         cursor.as_ref(),
                         &PixmapPaint {
+                            opacity,
                             quality: tiny_skia::FilterQuality::Bilinear,
                             ..Default::default()
                         },
@@ -583,6 +602,20 @@ impl Renderer {
                 *out = (total / count as u16) as u8;
             }
         }
+        let click = self.clicks.partition_point(|point| point.t <= time);
+        if click > 0 && job.cursor_captured && !clip.hide_cursor && value_number(a, "cursorSize", 24.) > 0. && ["circle", "ripple"].contains(&value_str(a, "clickEffect", "none")) {
+            let point = &self.clicks[click - 1]; let age = (time - point.t) / 0.35;
+            if age < 1. {
+                let ripple = a["clickEffect"] == "ripple";
+                let radius = value_number(a, "cursorSize", 24.) * w / 1920. * current.scale * if ripple { 0.7 + age * 1.5 } else { 1. };
+                let x = w / 2. + (point.x - current.x) * self.vw * current.scale; let y = h / 2. + (point.y - current.y) * self.vh * current.scale;
+                if let Some(path) = PathBuilder::from_circle(x as f32, y as f32, radius as f32) {
+                    let mut paint = Paint::default(); paint.set_color_rgba8(173, 145, 255, ((1. - age) * 0.65 * 255.) as u8);
+                    if ripple { layer.stroke_path(&path, &paint, &Stroke { width: (2. * w / 1920. * current.scale) as f32, ..Stroke::default() }, Transform::identity(), None); }
+                    else { layer.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None); }
+                }
+            }
+        }
         let left = w / 2. - current.x * self.vw * current.scale;
         let top = h / 2. - current.y * self.vh * current.scale;
         let vw = self.vw * current.scale;
@@ -596,13 +629,14 @@ impl Renderer {
             Transform::identity(),
         );
         for effect in &job.effects {
+            if ["caption", "watermark"].contains(&value_str(effect, "kind", "")) { continue; }
             if time < value_number(effect, "start", 0.) || time >= value_number(effect, "end", 0.) {
                 continue;
             }
-            let x = 0.5 + (value_number(effect, "x", 0.5) - 0.5) * self.span_x;
-            let y = 0.5 + (value_number(effect, "y", 0.5) - 0.5) * self.span_y;
-            let ew = value_number(effect, "width", 0.2) * self.span_x * vw;
-            let eh = value_number(effect, "height", 0.2) * self.span_y * vh;
+            let x = value_number(effect, "x", 0.5);
+            let y = value_number(effect, "y", 0.5);
+            let ew = value_number(effect, "width", 0.2) * vw;
+            let eh = value_number(effect, "height", 0.2) * vh;
             let x = w / 2. + (x - current.x) * vw - ew / 2.;
             let y = h / 2. + (y - current.y) * vh - eh / 2.;
             let mut em = Mask::new(self.width, self.height).ok_or("Sem memória para o efeito.")?;
@@ -622,6 +656,17 @@ impl Renderer {
                     Transform::identity(),
                     Some(&em),
                 );
+            } else if effect["kind"] == "spotlight" {
+                let mut outside = em.clone(); outside.invert();
+                let mut paint = Paint::default(); paint.set_color_rgba8(0, 0, 0, (value_number(effect, "opacity", 0.65) * 255.) as u8);
+                layer.fill_rect(tiny_skia::Rect::from_xywh(0., 0., w as f32, h as f32).unwrap(), &paint, Transform::identity(), Some(&outside));
+            } else if effect["kind"] == "magnifier" {
+                let zoom = 2. * vw / self.sw as f64;
+                let transform = Transform::from_row(zoom as f32, 0., 0., zoom as f32, (x + ew / 2. - value_number(effect, "x", 0.5) * self.sw as f64 * zoom) as f32, (y + eh / 2. - value_number(effect, "y", 0.5) * self.sh as f64 * zoom) as f32);
+                layer.draw_pixmap(0, 0, source.as_ref(), &PixmapPaint::default(), transform, Some(&em));
+            } else if let Some(graphic) = self.annotations.get(value_str(effect, "id", "")) {
+                let transform = Transform::from_row((ew / graphic.width() as f64) as f32, 0., 0., (eh / graphic.height() as f64) as f32, x as f32, y as f32);
+                layer.draw_pixmap(0, 0, graphic.as_ref(), &PixmapPaint { opacity: value_number(effect, "opacity", 1.) as f32, ..PixmapPaint::default() }, transform, None);
             } else {
                 let mut paint = Paint::default();
                 paint.set_color_rgba8(
@@ -681,6 +726,15 @@ impl Renderer {
                 &job.keys,
                 &a["cameraMotion"],
             )?;
+        }
+        for effect in &job.effects {
+            if !["caption", "watermark"].contains(&value_str(effect, "kind", "")) || time < value_number(effect, "start", 0.) || time >= value_number(effect, "end", 0.) { continue; }
+            if let Some(graphic) = self.annotations.get(value_str(effect, "id", "")) {
+                let ew = value_number(effect, "width", 0.8) * w; let eh = value_number(effect, "height", 0.12) * h;
+                let x = (value_number(effect, "x", 0.5) - value_number(effect, "width", 0.8) / 2.) * w;
+                let y = (value_number(effect, "y", 0.87) - value_number(effect, "height", 0.12) / 2.) * h;
+                output.draw_pixmap(0, 0, graphic.as_ref(), &PixmapPaint { opacity: value_number(effect, "opacity", 1.) as f32, ..PixmapPaint::default() }, Transform::from_row((ew / graphic.width() as f64) as f32, 0., 0., (eh / graphic.height() as f64) as f32, x as f32, y as f32), None);
+            }
         }
         Ok(output)
     }

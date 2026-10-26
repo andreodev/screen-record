@@ -1,5 +1,5 @@
 export type Clip = { start: number; end: number; speed?: number; hideCursor?: boolean; cursorOriginal?: boolean };
-export type Effect = { id: string; kind: "mask" | "highlight"; start: number; end: number; x: number; y: number; width: number; height: number; opacity: number };
+export type Effect = { id: string; kind: "mask" | "highlight" | "text" | "arrow" | "rectangle" | "ellipse" | "spotlight" | "magnifier" | "caption" | "watermark"; text?: string; color?: string; start: number; end: number; x: number; y: number; width: number; height: number; opacity: number };
 export const clipSpeed = (clip: Clip) => clip.speed ?? 1;
 export function clipRanges(trim: Clip, clips?: Clip[]) {
   return (clips ?? [trim]).map((clip, index) => ({...clip, start: Math.max(trim.start, clip.start), end: Math.min(trim.end, clip.end), index})).filter(clip => clip.end > clip.start);

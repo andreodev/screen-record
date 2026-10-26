@@ -3,11 +3,24 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub(crate) struct RecordingOptions {
+    pub source: Option<RecordingSource>,
+    pub resolution: Option<u32>,
+    pub fps: Option<u32>,
     pub output_device: Option<String>,
     pub microphone_device: Option<String>,
     pub camera_device: Option<String>,
     pub microphone_processing: MicrophoneProcessing,
 }
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RecordingSource {
+    pub kind: String,
+    pub id: u64,
+    pub area: Option<RecordingArea>,
+}
+#[derive(Clone, Deserialize, Serialize)]
+pub(crate) struct RecordingArea { pub x: f64, pub y: f64, pub width: f64, pub height: f64 }
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -35,6 +48,19 @@ impl Default for MicrophoneProcessing {
 }
 impl RecordingOptions {
     pub fn validate(&self) -> Result<(), String> {
+        if self.resolution.is_some_and(|value| ![1080, 2160].contains(&value)) || self.fps.is_some_and(|value| ![30, 60].contains(&value)) {
+            return Err("Qualidade de captura inválida.".into());
+        }
+        if let Some(source) = &self.source {
+            if !["display", "window", "area"].contains(&source.kind.as_str()) || source.kind == "area" && source.area.is_none() {
+                return Err("Fonte de captura inválida.".into());
+            }
+            if let Some(area) = &source.area {
+                if [area.x, area.y, area.width, area.height].iter().any(|n| !n.is_finite()) || area.x < 0. || area.y < 0. || area.width < 32. || area.height < 32. || area.x + area.width > 65536. || area.y + area.height > 65536. {
+                    return Err("Área de captura inválida.".into());
+                }
+            }
+        }
         if [
             &self.output_device,
             &self.microphone_device,
@@ -101,6 +127,8 @@ mod tests {
         assert!(options.microphone_processing.noise_suppression);
         assert!(options.microphone_processing.compressor);
         assert!(options.validate().is_ok());
+        for source in [r#"{"source":{"kind":"area","id":1,"area":{"x":-1,"y":0,"width":640,"height":480}}}"#, r#"{"source":{"kind":"area","id":1}}"#, r#"{"fps":12}"#, r#"{"resolution":8000}"#] { assert!(serde_json::from_str::<RecordingOptions>(source).unwrap().validate().is_err()); }
+        assert!(serde_json::from_str::<RecordingOptions>(r#"{"source":{"kind":"window","id":123},"fps":30,"resolution":1080}"#).unwrap().validate().is_ok());
         let mut invalid = options.clone();
         invalid.microphone_processing.ratio = f64::NAN;
         assert!(invalid.validate().is_err());

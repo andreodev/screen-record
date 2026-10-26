@@ -1,4 +1,66 @@
-import { clamp, type Appearance, type CameraKey } from './zoom.ts';
+import { cameraFromKeys, clamp, cursorAnchors, type Appearance, type CameraKey, type CursorEvent } from './zoom.ts';
+export type CursorResponse = { style: 'off' | 'smooth' | 'cinematic' | 'dynamic'; intensity: number; directionImpact: boolean };
+export const cursorResponsePresets = {
+  off: { amplitude: 0, duration: .09, frequency: 10 },
+  smooth: { amplitude: .0015, duration: .09, frequency: 10 },
+  cinematic: { amplitude: .0025, duration: .12, frequency: 11 },
+  dynamic: { amplitude: .0035, duration: .15, frequency: 12 },
+};
+export function cursorResponseFor(look: Appearance): CursorResponse {
+  return look.cursorResponse ?? { style: 'off', intensity: 1, directionImpact: true };
+}
+
+/** Bake source coordinates once; native renderers interpolate this same track. */
+export function responsiveCursor(events: CursorEvent[], keys: CameraKey[], response: CursorResponse, frameWidth = 1, frameHeight = 1): CursorEvent[] {
+  const preset = cursorResponsePresets[response.style];
+  if (!preset.amplitude || response.intensity <= 0 || !events.length || frameWidth <= 0 || frameHeight <= 0) return events;
+  const anchors = cursorAnchors(events);
+  let anchor = 0, first = 0, energy = 0, lastMove = -Infinity, lastImpact = -Infinity, travel = 0;
+  let directionX = 0, directionY = 0, previousVX = 0, previousVY = 0;
+  return events.map((event, i) => {
+    const previous = events[i - 1] ?? event, dt = Math.max(0, event.t - previous.t);
+    const cam = cameraFromKeys(event.t, keys), wx = frameWidth * cam.scale, wy = frameHeight * cam.scale;
+    const stepX = (event.x - previous.x) * wx, stepY = (event.y - previous.y) * wy;
+    if (Math.hypot(stepX, stepY) > .00002) lastMove = event.t;
+    while (first < i && events[first + 1].t <= event.t - .04) first++;
+    const elapsed = event.t - events[first].t;
+    const vx = elapsed > 0 ? (event.x - events[first].x) * wx / elapsed : 0;
+    const vy = elapsed > 0 ? (event.y - events[first].y) * wy / elapsed : 0;
+    const speed = Math.hypot(vx, vy), acceleration = dt > 0 ? Math.hypot(vx - previousVX, vy - previousVY) / dt : 0;
+    previousVX = vx; previousVY = vy;
+    const moving = event.t - lastMove < .04;
+    const target = moving ? clamp((speed - .08) / .35, 0, 1) : 0;
+    energy += (target - energy) * (1 - Math.exp(-dt / .025));
+    if (event.t - lastMove >= .12) energy = 0;
+    if (speed > .08 && moving) {
+      const nx = vx / speed, ny = vy / speed;
+      if (response.directionImpact && nx * directionX + ny * directionY < -.25 && travel > .025 && event.t - lastImpact >= .45) {
+        lastImpact = event.t; travel = 0;
+      }
+      travel += Math.hypot(stepX, stepY);
+      directionX = nx; directionY = ny;
+    }
+    while (anchor < anchors.length && anchors[anchor] < event.t) anchor++;
+    const clickDistance = Math.min(Math.abs(event.t - (anchors[anchor] ?? Infinity)), Math.abs(event.t - (anchors[anchor - 1] ?? -Infinity)));
+    const clickFade = clamp(clickDistance / .04, 0, 1);
+    const phase = 2 * Math.PI * preset.frequency * event.t;
+    const age = event.t - lastImpact, duration = Math.min(.14, preset.duration);
+    const impact = age > 0 && age < duration ? Math.sin(Math.PI * age / duration) * (1 - age / duration) * clamp(1 - (event.t - lastMove) / .12, 0, 1) : 0;
+    const amplitude = preset.amplitude * clamp(response.intensity, 0, 1) * clickFade;
+    const along = Math.sin(phase) * .72 * energy + impact * .25;
+    const across = Math.sin(phase * .73 + .7) * .18 * energy;
+    const gain = .85 + .15 * clamp(acceleration / 8, 0, 1);
+    let dx = (directionX * along - directionY * across) * amplitude * gain;
+    let dy = (directionY * along + directionX * across) * amplitude * gain;
+    const edgeX = Math.min(event.x, 1 - event.x, .5 / wx - Math.abs(event.x - cam.x)) * wx;
+    const edgeY = Math.min(event.y, 1 - event.y, .5 / wy - Math.abs(event.y - cam.y)) * wy;
+    const edgeFade = clamp(Math.min(edgeX, edgeY) / .04, 0, 1);
+    const length = Math.hypot(dx, dy), limit = amplitude * edgeFade;
+    const factor = length > 0 ? Math.min(edgeFade, limit / length) : 0;
+    dx *= factor; dy *= factor;
+    return { ...event, x: clamp(event.x + dx / wx, 0, 1), y: clamp(event.y + dy / wy, 0, 1) };
+  });
+}
 export type CameraMotion = {
   style: 'smooth' | 'cinematic' | 'dynamic';
   shake: boolean; webcamShake?: boolean; intensity: number; duration: number; frequency: number;
@@ -6,8 +68,8 @@ export type CameraMotion = {
 };
 export const motionPresets: Record<CameraMotion['style'], CameraMotion> = {
   smooth: { style: 'smooth', shake: false, intensity: .001, duration: .12, frequency: 12, spring: true, damping: 1.05, blur: false, blurIntensity: .15 },
-  cinematic: { style: 'cinematic', shake: true, intensity: .0015, duration: .12, frequency: 12, spring: true, damping: .95, blur: true, blurIntensity: .18 },
-  dynamic: { style: 'dynamic', shake: true, intensity: .003, duration: .16, frequency: 10, spring: true, damping: .85, blur: true, blurIntensity: .3 },
+  cinematic: { style: 'cinematic', shake: true, intensity: .0018, duration: .14, frequency: 12, spring: true, damping: .95, blur: true, blurIntensity: .18 },
+  dynamic: { style: 'dynamic', shake: true, intensity: .0032, duration: .17, frequency: 10, spring: true, damping: .85, blur: true, blurIntensity: .3 },
 };
 export function cameraMotionFor(look: Appearance): CameraMotion {
   return look.cameraMotion ?? { ...motionPresets.cinematic, spring: look.cameraSpring ?? true };

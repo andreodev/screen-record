@@ -1,4 +1,7 @@
 """macOS integration checks. Uses only synthetic media in a temporary directory."""
+import base64
+import struct
+import zlib
 import hashlib
 import json
 from pathlib import Path
@@ -57,6 +60,9 @@ with tempfile.TemporaryDirectory(prefix="frame-test-") as folder:
     source, audio = folder / "source.mov", folder / "audio.mov"
     run(str(fixture), str(source))
     run(str(add_audio), str(source), str(audio))
+    analysis = json.loads(run(str(helper), "analyze-audio", str(folder / "capture-audio-files/microphone.m4a")).splitlines()[-1])
+    assert analysis["step"] == .1 and analysis["levels"][0] < .001 and max(analysis["levels"]) > .05, analysis
+    print("Local audio analysis preserves startup silence and detects microphone signal.")
     original = hashlib.sha256(source.read_bytes()).digest()
     jobfile, destination = folder / "job.json", folder / "output.mp4"
     run("node", "--experimental-strip-types", "tests/export-fixture.ts", str(source), str(destination), str(jobfile))
@@ -87,6 +93,11 @@ with tempfile.TemporaryDirectory(prefix="frame-test-") as folder:
         else:
             assert child.returncode == 0, log.read_text() + stderr
         return log.read_text()
+
+    for codec, tag in [("hevc", "hvc1"), ("prores-lt", "apcs"), ("prores", "apcn"), ("prores-hq", "apch"), ("prores-4444", "ap4h")]:
+        variant = {**job, "codec": codec, "quality": "balanced", "resolution": 720, "fps": 24, "destination": str(folder / (codec + (".mov" if codec.startswith("prores") else ".mp4")))}
+        export_job(variant)
+        print(run(str(checker), variant["destination"], "--codec", tag, "--format", "1152", "720", "24").strip(), codec)
 
     capture_mix = {**job, "start": 0, "end": 3, "sourceVolume": 0.4, "microphone": {"path": str(folder / "capture-audio-files/microphone.m4a"), "volume": 0.7}, "resolution": 720, "cursorCaptured": False, "appearance": {**job["appearance"], "aspect": "16:9", "clickSounds": False}, "destination": str(folder / "captured-audio-mix.mp4")}
     export_job(capture_mix)
@@ -227,12 +238,37 @@ with tempfile.TemporaryDirectory(prefix="frame-test-") as folder:
     job["destination"] = str(folder / "effects-base.mp4")
     export_job(job)
     effects_base = job["destination"]
-    for kind in ["mask", "highlight"]:
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
+    png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 16, 16, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress((b'\x00' + bytes([255, 40, 80, 255]) * 16) * 16)) + chunk(b'IEND', b'')
+    for kind in ["mask", "highlight", "spotlight", "magnifier", "text", "arrow", "rectangle", "ellipse", "caption", "watermark"]:
+        job["annotationImages"] = {kind: base64.b64encode(png).decode()} if kind in ["text", "arrow", "rectangle", "ellipse", "caption", "watermark"] else {}
         job["effects"] = [{"id": kind, "kind": kind, "start": .3, "end": 2.5, "x": .5, "y": .5, "width": .35, "height": .32, "opacity": .55}]
         job["destination"] = str(folder / f"{kind}-output.mp4")
         export_job(job)
         print(run(str(checker), job["destination"], "--different-frame", effects_base).strip(), f"with {kind} effect pixels checked")
     job.pop("effects")
+    job.pop("annotationImages", None)
+    clicks = [{"t": 0, "x": .5, "y": .5, "down": False}, {"t": 1.2, "x": .5, "y": .5, "down": True}, {"t": 1.25, "x": .5, "y": .5, "down": False}, {"t": 3, "x": .5, "y": .5, "down": False}]
+    cursor_base = {**job, "cursor": clicks, "rawCursor": clicks, "cursorActivity": [0], "appearance": {**job["appearance"], "cursorSize": 36}, "destination": str(folder / "idle-base.mp4")}
+    export_job(cursor_base)
+    for style in ["circle", "ripple", "idle"]:
+        variant = {**cursor_base, "appearance": {**cursor_base["appearance"], **({"hideIdleCursor": True} if style == "idle" else {"clickEffect": style})}, "destination": str(folder / f"cursor-{style}.mp4")}
+        export_job(variant)
+        print(run(str(checker), variant["destination"], "--different-frame", cursor_base["destination"]).strip(), f"with {style} cursor behavior")
+
+    cursor_cases = folder / "cursor-response.json"
+    run("node", "--experimental-strip-types", "tests/cursor-response-fixture.ts", str(source), str(folder), str(cursor_cases))
+    for case in json.loads(cursor_cases.read_text()):
+        plain = {**case, "cursor": case["plainCursor"], "destination": str(folder / f"cursor-{case['name']}-off.mp4")}
+        export_job(plain)
+        export_job(case)
+        run(str(checker), case["destination"], "--duration", "3", "--format", "1280", "720", "30", "--compare-cursor", plain["destination"], "same" if case["name"] == "typing" else "different", "1.1")
+        run(str(checker), case["destination"], "--duration", "3", "--compare-cursor", plain["destination"], "same", "2.5")
+        if case["name"] == "diagonal":
+            run(str(checker), case["destination"], "--duration", "3", "--compare-cursor", plain["destination"], "same", "1.5")
+        print(f"Cursor response export passed: {case['name']}, 720p30, movement/stop/click pixels.")
+
     job["keys"] = [{"t": 0, "x": .5, "y": .5, "scale": 1}, {"t": 1.3, "x": .5, "y": .5, "scale": 2, "cut": True}, {"t": 1.8, "x": .5, "y": .5, "scale": 1, "cut": True}, {"t": 3, "x": .5, "y": .5, "scale": 1}]
     job["destination"] = str(folder / "instant-output.mp4")
     export_job(job)

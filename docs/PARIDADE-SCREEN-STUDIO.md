@@ -1,5 +1,8 @@
 # Paridade funcional — continuação em 21/10/2026
 
+Esta matriz é histórica. O [estado atualizado da execução com FocuSee](PLANO-FRAME-STUDIO-FOCUSEE.md) registra as entregas de 25/10 e corrige os itens que já existiam no código.
+
+
 Referência: instalação local Screen Studio 4.1.0-5005, interface e módulos recuperados. O objetivo é equivalência de fluxo, aparência e recursos; nenhum percentual de paridade foi medido. O Frame Studio ainda não está completo.
 
 Ideias e critérios de desenvolvimento derivados da leitura do guia oficial: [REFERENCIA-GUIA-SCREEN-STUDIO.md](REFERENCIA-GUIA-SCREEN-STUDIO.md).

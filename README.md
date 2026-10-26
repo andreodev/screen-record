@@ -69,13 +69,15 @@ A composição Windows usa CPU e não tem aceleração GPU nesta versão. A suav
 ## Fluxo disponível
 
 1. **Importar vídeo** abre MOV/MP4/M4V local em um diálogo nativo. H.264 é o formato inicial recomendado.
-2. **Nova gravação** inicia ScreenCaptureKit no monitor principal, sem áudio. **Parar gravação** finaliza o MOV e abre o editor. O macOS precisa autorizar **Frame Studio** (a permissão do Screen Studio é independente) em Privacidade e Segurança → Gravação de Tela e Áudio do Sistema; pode ser necessário reabrir o app. Se a opção já estiver ligada e o acesso continuar bloqueado após recompilar, remova a entrada antiga e adicione novamente o bundle atual; builds locais usam assinatura ad hoc e podem exigir nova autorização.
+2. **Nova gravação** abre a seleção de monitor, janela ou área, com resolução máxima de 1080p/4K e 30/60 fps. Webcam, microfone e áudio do sistema seguem as escolhas da barra de gravação. **Parar gravação** finaliza o MOV e abre o editor. O macOS precisa autorizar **Frame Studio** (a permissão do Screen Studio é independente) em Privacidade e Segurança → Gravação de Tela e Áudio do Sistema; pode ser necessário reabrir o app. Se a opção já estiver ligada e o acesso continuar bloqueado após recompilar, remova a entrada antiga e adicione novamente o bundle atual; builds locais usam assinatura ad hoc e podem exigir nova autorização.
 3. **Zooms** oferece os modos Automático, Manual e Híbrido (padrão), com keyframes editáveis na timeline. A gravação registra posição do cursor e botões esquerdo/direito/meio a 120 Hz; cliques próximos são agrupados e movimentos relevantes seguidos de pausa podem gerar foco suave. Ao editar um zoom automático, ele passa a ser um ajuste manual e tem prioridade no modo Híbrido.
 4. **Aparência** ajusta gradiente, margem, cantos e sombra. **Fundo com vídeo desfocado** preserva a imagem inteira sobre um fundo ampliado e desfocado, útil quando um crop 9:16 cortaria conteúdo importante. **Salvar como padrão** conserva o preset para novos vídeos.
 5. **Salvar** cria um pacote `.framestudio` com vídeo, cursor, edição, backup e prévia. Depois do primeiro salvamento, as alterações são salvas automaticamente. **Salvar como** cria uma cópia independente. O pacote pode ser movido ou copiado inteiro e reaberto por duplo clique no Finder. Os projetos antigos `.frame.json` continuam abrindo; o próximo salvamento pode convertê-los em um pacote.
-6. **Exportar** abre opções de 480p/720p/1080p/1440p/4K e 24/30/60 fps (inicialmente 4K60) e gera MP4 H.264 com zooms, cursor, aparência e trecho escolhido. Em 9:16, 1080p gera 1080×1920 e 4K gera 2160×3840. Preserva o áudio da gravação/importação e oferece progresso e cancelamento.
+6. **Exportar** abre opções de 480p/720p/1080p/1440p/4K e 24/30/60 fps (inicialmente 4K60) e gera MP4 H.264/HEVC ou MOV ProRes 422 LT/422/422 HQ/4444 com zooms, cursor, aparência e trecho escolhido. H.264 e HEVC oferecem qualidades Web, Equilibrada e Alta. Em 9:16, 1080p gera 1080×1920 e 4K gera 2160×3840. Preserva o áudio da gravação/importação e oferece progresso e cancelamento.
 
 Na timeline, posicione o marcador e use **Dividir** (⌘B). Selecione um trecho dourado ou um zoom roxo e use **Apagar** (Delete/Backspace). **Limpar zooms** remove todos os zooms; **Restaurar cortes** recupera os trechos. Os cortes participam da reprodução, autosave e exportação, com áudio e cursor sincronizados. O original permanece intacto.
+
+Ativar **Webcam** abre uma [prévia flutuante independente](docs/README-WEBCAM-FLOATING-PREVIEW.md), sempre no topo, arrastável e redimensionável. Ela permite trocar a câmera antes da gravação e parar a captura enquanto você usa outros aplicativos. A prévia é excluída da gravação da tela; a câmera continua em `webcam.mov` e permanece editável. Mover a janela serve apenas ao monitoramento. Ao terminar a gravação ou desativar a webcam, a janela fecha e a câmera é liberada.
 
 Selecione um **trecho dourado** para ajustar sua velocidade (0,25× a 4×), ocultar o cursor ou usar seu movimento original somente nesse intervalo. Dividir um trecho preserva essas opções nas duas partes. A duração editada e a exportação consideram a velocidade de cada trecho, inclusive o áudio.
 
@@ -83,7 +85,28 @@ Em **Zooms**, ative **Zoom instantâneo** para entrar e sair sem transição; ar
 
 Espaço reproduz/pausa, setas avançam/recuam um frame, ⌘Z desfaz e ⇧⌘Z refaz. A velocidade da prévia não altera a exportação.
 
+## Anotações, legendas e ritmo
+
+- **＋ Anotação** na timeline adiciona texto, seta, retângulo, elipse, spotlight, lupa ou marca d’água. A ferramenta **Anotações** edita tipo, cor, texto, tamanho e duração. Várias camadas aparecem simultaneamente; arraste a área ou use as setas para posicionar. Desfoque e destaque continuam disponíveis.
+- **Importar legendas SRT** usa tempos do vídeo original, preservados ao cortar ou alterar a velocidade. Cada bloco aceita edição de texto, tempo, cor e posição. Legendas e marca d’água ficam fixas no quadro final durante os zooms.
+- **Ritmo** analisa o microfone, quando disponível, ou o áudio da fonte. Exibe forma de onda e sugestões de silêncio para revisar e aplicar. A aceleração de digitação usa apenas os eventos de digitação registrados, sem texto digitado. Ambas preservam os cortes existentes e podem ser desfeitas.
+- **Cursor** oferece círculo/onda de clique e ocultação após um segundo parado, com fade de 200 ms. Os controles valem para a prévia e para a exportação.
+- **Recentes** reabre até 20 projetos. Se o manifesto estiver danificado e houver backup válido, o app o recupera e preserva o original como `project.json.corrupt-*`. Versões futuras desconhecidas são rejeitadas.
+- Anotações e os novos controles de cursor usam schema 12. Máscaras antigas com crop são convertidas ao abrir, preservando sua posição exportada. Os projetos anteriores continuam legíveis.
+
 ## Zoom e leveza
+
+A implementação, os controles e os limites estão em [README — Cursor com movimento orgânico e zoom guiado](docs/README-SHAKE-CURSOR.md).
+
+### Cursor inteligente e zoom acompanhado
+
+O Frame Studio reconstrói o cursor separado do vídeo e usa a trajetória gravada para manter o foco legível. Zooms automáticos acompanham cliques, digitação e pausas após movimentos relevantes; durante um foco ativo a câmera cria uma pequena zona de segurança, antecipa parte do deslocamento e suaviza a aproximação para o cursor não ficar colado na borda.
+
+No painel **Animações**, escolha a animação do cursor (Original, Suave, Médio ou Rápido), ajuste o motion blur e deixe o **Spring** ligado para transições naturais. O **Camera Motion** aplica impactos curtos nos inícios, paradas e mudanças de direção da câmera. Os presets Cinematic e Dynamic usam micro-shakes leves; a intensidade e a duração continuam editáveis, e impactos manuais podem ser adicionados no marcador.
+
+O acompanhamento é calculado offline a partir dos mesmos eventos usados na prévia e na exportação. Isso mantém o resultado consistente ao buscar qualquer ponto da timeline, em formatos 16:9, 9:16 e 1:1. O cursor preserva a posição exata dos cliques, pode desaparecer após um segundo parado e recebe círculo ou onda de clique.
+
+Em **Animações → Resposta ao movimento**, escolha Desligada, Suave, Cinematic ou Dynamic e ajuste a intensidade. O cursor responde à velocidade e à direção, reduz o shake nas bordas e para em até 120 ms após o movimento. **Impacto ao mudar de direção** adiciona um acento curto. **Acompanhar cursor** oferece Desligado, Equilibrado e Próximo, com **Antecipação do zoom** entre 0% e 35%. Novos projetos usam Cinematic, Equilibrado e 30%; projetos antigos mantêm o shake do cursor desligado até você ativar. As configurações são salvas no schema 13.
 
 - Curvas de entrada/saída suaves, coordenadas limitadas à imagem e trajetória determinística compartilhada com a exportação.
 - O reenquadramento 9:16 acompanha interações em diferentes regiões e limita o foco ao crop visível. O controle **Acompanhar cursor** move esse crop suavemente entre zooms.
@@ -99,6 +122,7 @@ Espaço reproduz/pausa, setas avançam/recuam um frame, ⌘Z desfaz e ⇧⌘Z re
 pnpm build
 node --experimental-strip-types tests/zoom.test.ts
 node --experimental-strip-types tests/cursor.test.ts
+node --experimental-strip-types tests/cursor-response.test.ts
 node --experimental-strip-types tests/animations.test.ts
 node --experimental-strip-types tests/timeline.test.ts
 cargo test --manifest-path src-tauri/Cargo.toml --lib
@@ -114,8 +138,8 @@ Projetos com cortes usam schema 3; projetos com velocidade/opções de cursor po
 ## Limitações desta primeira implementação
 
 - A captura foi inicialmente bloqueada pelo TCC; uma sessão posterior de 8,7 s gerou vídeo, 1.019 amostras de cursor e três sugestões de zoom no desktop. Permissões continuam dependendo do macOS. Faltam sessões longas e calibração em outras escalas/monitores.
-- Eventos de mouse são amostrados a 120 Hz; cliques breves podem escapar entre amostras. A captura não registra texto digitado nem a identidade de páginas, menus ou modais, então o foco automático infere intenção por clique, deslocamento e pausa.
-- Ainda faltam seleção de janela/área, captura de microfone/áudio do sistema, legendas e lista de projetos recentes. Motion blur aumenta o trabalho de composição e ainda precisa de medição longa na prévia. O manifesto anterior fica em `project.json.bak`; recuperação automática após corrupção ainda não foi implementada.
+- A posição do mouse é amostrada a 120 Hz. No macOS, eventos de down/up complementam a amostragem; no Windows, cliques breves ainda podem escapar entre amostras. A captura não registra texto digitado nem a identidade de páginas, menus ou modais, então o foco automático infere intenção por clique, deslocamento e pausa.
+- Seleção de janela/área e cliques por eventos no macOS precisam de calibração real em diferentes monitores/escalas. Motion blur ainda exige medição longa. Legendas automáticas, corte de palavras de preenchimento e remoção de fundo não estão implementados; as legendas atuais são SRT ou texto manual.
 - Somente a primeira faixa de áudio importada é exportada; vídeos HDR, codecs alternativos e fontes com orientação especial precisam de uma matriz maior de testes.
 - Há benchmark de prévia/exportação de um projeto sintético de 10 minutos, com limites de atribuição dos serviços do macOS. Captura longa real, 4K e cinco ciclos de abertura continuam pendentes. O bundle debug não representa o tamanho final de produção.
 - Fechamento pela janela bloqueado durante captura/exportação. Forçar o encerramento pode deixar uma gravação incompleta.
@@ -125,6 +149,10 @@ Exportação 4K60 amplia fontes menores e repete frames quando necessário; sele
 Resultados e reprodução do benchmark: [desempenho](docs/DESEMPENHO.md).
 
 Veja [o plano completo](docs/PLANO-SCREEN-STUDIO.md) e [o estado das entregas](docs/IMPLEMENTACAO.md).
+
+Plano do preview flutuante da webcam: [janela independente durante a gravação](docs/README-WEBCAM-FLOATING-PREVIEW.md).
+
+Plano do episódio combinado com FocuSee: [escopo, lacunas e sequência](docs/PLANO-FRAME-STUDIO-FOCUSEE.md).
 
 ## Estrutura do projeto
 

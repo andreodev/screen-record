@@ -8,7 +8,8 @@
    precondition(abs(webcamEase((test["t"] as! Double).truncatingRemainder(dividingBy:1),"cubic-bezier")-(test["bezier"] as! Double))<1e-10)
    let size=webcamZoomSize(0.32,scale,test["behavior"] as? String,0.16)
    precondition(abs(scale-(test["scale"] as! Double))<1e-10 && abs(size-(test["size"] as! Double))<1e-10)
-   let moving=webcamMotionState(WebcamKeyframe(t:0,x:0.3,y:0.7,size:0.32,opacity:1,borderRadius:0.18,easing:nil),test["t"] as! Double,CameraMotion(intensity:0.0015,duration:0.12,frequency:12,webcamShake:true,impacts:[1,3]))
+   let motion = try JSONDecoder().decode(CameraMotion.self, from: JSONSerialization.data(withJSONObject: test["motion"]!))
+   let moving=webcamMotionState(WebcamKeyframe(t:0,x:0.3,y:0.7,size:0.32,opacity:1,borderRadius:0.18,easing:nil),test["t"] as! Double,motion)
    let expected=test["webcamMotion"] as! [String:Double]
    precondition(abs(moving.x-expected["x"]!)<1e-10 && abs(moving.y-expected["y"]!)<1e-10)
    let manual=WebcamKeyframe(t:0,x:0.3,y:0.7,size:0.32,opacity:0.5,borderRadius:0.18,easing:nil)

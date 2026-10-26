@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "camera-preview",
+  "description": "Move and resize the independent webcam monitor",
+  "windows": ["camera-preview"],
+  "permissions": ["core:default", "core:window:allow-start-dragging", "core:window:allow-start-resize-dragging", "core:window:allow-set-position", "core:window:allow-set-size"]
+}
