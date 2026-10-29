@@ -1,0 +1,83 @@
+/* Lanes determine the height; short windows scroll above the footer. */
+.timeline {
+  --timeline-label-width: 88px;
+  height: auto;
+  max-height: 48vh;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 24px 0;
+  border-top: 1px solid #ffffff0d;
+  background: #0c0d11;
+}
+
+.timeline-heading {
+  height: auto;
+  min-height: 34px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding-bottom: 6px;
+}
+
+.timeline-actions { flex-wrap: wrap; gap: 5px; }
+.timeline-heading > span:first-child { flex-shrink: 0; }
+.timeline-scroll { min-height: 0; overflow: auto; padding: 0 4px 12px 0; scrollbar-width: thin; scrollbar-color: #454050 transparent; }
+.timeline .ruler { margin-left: var(--timeline-label-width); height: 24px; font-size: 10px; }
+.timeline .seek-range { margin: 0 0 10px var(--timeline-label-width); width: calc(100% - var(--timeline-label-width)); }
+.timeline .tracks { margin-left: var(--timeline-label-width); display: flex; flex-direction: column; gap: 6px; }
+
+.timeline .clip-lane { height: 42px; overflow: visible; }
+.timeline .clip-track { height: 100%; border-radius: 7px; }
+.timeline .audio-track { height: 22px; margin: 0; overflow: visible; }
+.timeline .effect-track { height: 26px; margin: 0; overflow: visible; }
+.timeline .effect-block { height: calc(100% - 4px); }
+.timeline .webcam-track { height: 24px; margin: 0; overflow: visible; }
+.timeline .zoom-track { height: 34px; margin: 0; border: 1px solid #b49aff20; border-radius: 7px; }
+.timeline .tracks > div { flex-shrink: 0; }
+
+.timeline [data-label]::before,
+.timeline .webcam-track-title,
+.timeline .zoom-track-title {
+  content: attr(data-label);
+  position: absolute;
+  left: calc(-1 * var(--timeline-label-width));
+  top: 50%;
+  transform: translateY(-50%);
+  width: var(--timeline-label-width);
+  padding: 0 10px 0 0;
+  background: transparent;
+  color: #a5a3b1;
+  font-size: 10px;
+  line-height: 1.4;
+  font-weight: 500;
+  pointer-events: none;
+}
+
+.timeline .zoom-track-title { color: #c1a5f2; }
+.timeline .zoom-block.automatic { background: #6845a27a; border-color: #a17cde66; color: #e3d2ff; }
+.timeline .zoom-block.automatic:hover:enabled { background: #7953b9a0; }
+.timeline .zoom-block.automatic.selected { border-color: #c9a6ff; background: #8659c4aa; }
+.timeline .zoom-block { font-size: 11px; }
+.timeline .track-placeholder { font-size: 10px; }
+.timeline .zoom-track .track-placeholder { padding: 0 10px; justify-content: center; }
+.timeline .webcam-track .webcam-track-hint { left: 9px; top: 4px; font-size: 9px; }
+.timeline .playhead { top: -12px; bottom: 0; background: #b088ff; z-index: 5; }
+.timeline .playhead::before { background: #b088ff; box-shadow: 0 0 0 2px #b088ff25; }
+.statusbar { flex-shrink: 0; }
+
+@media (max-height: 760px) {
+  .timeline { padding-top: 4px; }
+  .timeline .tracks { gap: 5px; }
+  .timeline .clip-lane { height: 36px; }
+  .timeline .zoom-track { height: 30px; }
+  .timeline .audio-track { height: 20px; }
+  .timeline .effect-track { height: 22px; }
+  .timeline .webcam-track { height: 22px; }
+}
+
+@media (max-width: 900px) {
+  .timeline { --timeline-label-width: 72px; padding-inline: 14px; }
+  .timeline-heading { align-items: flex-start; }
+  .timeline-actions button { font-size: 10px; padding: 5px 6px; }
+}

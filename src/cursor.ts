@@ -3,6 +3,7 @@ import type { Appearance, CursorEvent } from './zoom.ts';
 
 export const cursorThemes = [...new Set(catalog.cursors.filter(item => item.id.startsWith('sets/')).map(item => item.group))];
 export function themeCursor(theme: string, kind = 'pointer') {
+  kind = kind === 'hand' ? 'pointinghand' : kind === 'text' ? 'ibeam' : kind;
   const match = (group: string, role: string) => catalog.cursors.find(item => item.group === group && item.label.startsWith(`${role}-`));
   return match(theme, kind) || match('macos', kind) || match(theme, 'pointer') || match('macos', 'pointer')!;
 }

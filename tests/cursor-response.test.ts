@@ -63,3 +63,5 @@ for (const aspect of [16 / 9, 9 / 16, 1]) {
   }
 }
 console.log('Cursor response passed: directional energy, amplitude, idle, edges, all click buttons, blur, follow modes, seek and aspect ratios.');
+
+assert.deepEqual(responsiveCursor(horizontal, keys, cursorResponseFor(defaults)), horizontal, 'Default cursor follows its path without added oscillation');

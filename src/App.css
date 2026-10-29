@@ -58,3 +58,7 @@
 .click-ring{position:absolute;z-index:5;border:2px solid #ad91ff;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}.click-ring[hidden]{display:none}
 
 .video-viewport>.rendered-cursor{z-index:1}.video-viewport>.click-ring{z-index:2}
+
+/* Tool navigation must fit the row left above the timeline. */
+.editor-body{grid-template-rows:minmax(0,1fr)}
+.inspector-tabs{min-height:0;overflow-y:auto;scrollbar-width:none}

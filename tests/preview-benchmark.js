@@ -15,6 +15,27 @@
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const percentile = (values, p) => [...values].sort((a, b) => a - b)[Math.min(values.length - 1, Math.floor(values.length * p))] || 0;
   try {
+    if (config.mode === 'recording-capture') {
+      const until = async check => {
+        const deadline = Date.now() + 45000;
+        while (!check()) {
+          const error = document.querySelector('.error-text')?.textContent;
+          if (error) throw new Error(error);
+          if (Date.now() > deadline) throw new Error('Recording UI timed out: ' + document.querySelector('.operation-overlay')?.textContent);
+          await wait(100);
+        }
+      };
+      await until(() => document.querySelector('button.new-recording'));
+      document.querySelector('button.new-recording').click();
+      await until(() => document.querySelector('.capture-dialog .export-button:not(:disabled)'));
+      document.querySelector('.capture-dialog .export-button').click();
+      await until(() => document.querySelector('.operation-overlay strong')?.textContent.includes('Gravando'));
+      await wait(3000);
+      document.querySelector('.operation-overlay button').click();
+      await until(() => !document.querySelector('.operation-overlay') && document.querySelector('video')?.readyState >= 2);
+      await invoke('report_preview_benchmark', { report: { phase: 'recording-capture', passed: true, duration: document.querySelector('video').duration } });
+      shield.remove(); return;
+    }
     if (config.mode === 'editing') {
       const assert = (condition, message) => { if (!condition) throw new Error(message); };
       const until = async check => { const started = performance.now(); while (!check()) { if (performance.now() - started > 30000) throw new Error('Editing UI timed out'); await wait(100); } };

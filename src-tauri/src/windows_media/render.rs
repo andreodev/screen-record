@@ -82,8 +82,8 @@ pub(super) fn export(path: &Path) -> Result<()> {
     let sw = source["width"].as_u64().unwrap() as u32;
     let sh = source["height"].as_u64().unwrap() as u32;
     let (width, height) = dimensions(
-        sw,
-        sh,
+        sw as f64 * value_number(&job.appearance["crop"], "width", 1.),
+        sh as f64 * value_number(&job.appearance["crop"], "height", 1.),
         job.resolution,
         value_str(&job.appearance, "aspect", "auto"),
     );
@@ -239,12 +239,12 @@ impl Decoder {
     }
 }
 
-fn dimensions(sw: u32, sh: u32, resolution: u32, aspect: &str) -> (u32, u32) {
+fn dimensions(sw: f64, sh: f64, resolution: u32, aspect: &str) -> (u32, u32) {
     let ratio = match aspect {
         "16:9" => 16. / 9.,
         "9:16" => 9. / 16.,
         "1:1" => 1.,
-        _ => sw as f64 / sh as f64,
+        _ => sw / sh,
     };
     let short = resolution as f64;
     let long = short * 16. / 9.;
@@ -328,8 +328,11 @@ impl Renderer {
         let w = width as f64;
         let h = height as f64;
         let padding = w.min(h) * value_number(a, "padding", 9.) / 100.;
-        let fit_x = (w - 2. * padding) / sw as f64;
-        let fit_y = (h - 2. * padding) / sh as f64;
+        let crop = &a["crop"];
+        let crop_width = value_number(crop, "width", 1.);
+        let crop_height = value_number(crop, "height", 1.);
+        let fit_x = (w - 2. * padding) / (sw as f64 * crop_width);
+        let fit_y = (h - 2. * padding) / (sh as f64 * crop_height);
         let fill = a["cropFill"] == true;
         let scale = if fill {
             fit_x.max(fit_y)
@@ -411,14 +414,15 @@ impl Renderer {
                 })
             };
             let entry = if a["cursorTheme"].is_string() {
-                matches(theme, kind)
-                    .or_else(|| matches("macos", kind))
+                let role = match kind { "hand" => "pointinghand", "text" => "ibeam", _ => kind };
+                matches(theme, role)
+                    .or_else(|| matches("macos", role))
                     .or_else(|| matches(theme, "pointer"))
             } else {
                 entries
                     .iter()
                     .find(|e| e["id"] == a["cursorAsset"])
-                    .or_else(|| matches("macos", kind))
+                    .or_else(|| matches("macos", match kind { "hand" => "pointinghand", "text" => "ibeam", _ => kind }))
             }
             .ok_or("Cursor não encontrado.")?;
             let image = load_pixmap(
@@ -464,14 +468,14 @@ impl Renderer {
             vw,
             vh,
             span_x: if fill {
-                ((w - 2. * padding) / vw).min(1.)
+                ((w - 2. * padding) / vw).min(crop_width)
             } else {
-                1.
+                crop_width
             },
             span_y: if fill {
-                ((h - 2. * padding) / vh).min(1.)
+                ((h - 2. * padding) / vh).min(crop_height)
             } else {
-                1.
+                crop_height
             },
             background,
             cursors,
@@ -569,6 +573,7 @@ impl Renderer {
                     let (cursor, hx, hy, visible) = &self.cursors[p
                         .kind
                         .as_deref()
+                        .map(|k| match k { "pointinghand" => "hand", "ibeam" => "text", _ => k })
                         .filter(|k| self.cursors.contains_key(*k))
                         .unwrap_or("pointer")];
                     let index = job.cursor_activity.partition_point(|t| *t <= time);
@@ -616,14 +621,19 @@ impl Renderer {
                 }
             }
         }
-        let left = w / 2. - current.x * self.vw * current.scale;
-        let top = h / 2. - current.y * self.vh * current.scale;
+        let crop = &a["crop"];
+        let crop_x = value_number(crop, "x", 0.);
+        let crop_y = value_number(crop, "y", 0.);
+        let crop_width = value_number(crop, "width", 1.);
+        let crop_height = value_number(crop, "height", 1.);
+        let left = w / 2. + (crop_x - current.x) * self.vw * current.scale;
+        let top = h / 2. + (crop_y - current.y) * self.vh * current.scale;
         let vw = self.vw * current.scale;
         let vh = self.vh * current.scale;
         let radius = value_number(a, "radius", 12.) * w / 1000. * current.scale;
         let mut mask = Mask::new(self.width, self.height).ok_or("Sem memória para a máscara.")?;
         mask.fill_path(
-            &rounded(left, top, vw, vh, radius),
+            &rounded(left, top, vw * crop_width, vh * crop_height, radius),
             FillRule::Winding,
             true,
             Transform::identity(),
@@ -685,7 +695,7 @@ impl Renderer {
             }
         }
         let mut output = if a["backgroundMode"] == "video-blur" {
-            let bg = cover(source, self.width, self.height)?;
+            let bg = cover_region(source, self.width, self.height, crop_x, crop_y, crop_width, crop_height)?;
             let mut bg = blurred(
                 &bg,
                 (value_number(a, "backgroundBlur", 18.) * w / 1920.) as f32,
@@ -703,8 +713,8 @@ impl Renderer {
             &mut output,
             left,
             top + 12. * w / 1920. * current.scale,
-            vw,
-            vh,
+            vw * crop_width,
+            vh * crop_height,
             radius,
             18. * w / 1920. * current.scale,
             value_number(a, "shadow", 35.) / 100.,
@@ -984,8 +994,13 @@ fn load_pixmap(path: &Path) -> Result<Pixmap> {
     .ok_or_else(|| "Imagem inválida.".into())
 }
 fn cover(source: &Pixmap, width: u32, height: u32) -> Result<Pixmap> {
+    cover_region(source, width, height, 0., 0., 1., 1.)
+}
+fn cover_region(source: &Pixmap, width: u32, height: u32, x: f64, y: f64, crop_width: f64, crop_height: f64) -> Result<Pixmap> {
     let mut out = Pixmap::new(width, height).ok_or("Sem memória para o fundo.")?;
-    let s = (width as f32 / source.width() as f32).max(height as f32 / source.height() as f32);
+    let sw = source.width() as f32;
+    let sh = source.height() as f32;
+    let s = (width as f32 / (sw * crop_width as f32)).max(height as f32 / (sh * crop_height as f32));
     out.draw_pixmap(
         0,
         0,
@@ -999,8 +1014,8 @@ fn cover(source: &Pixmap, width: u32, height: u32) -> Result<Pixmap> {
             0.,
             0.,
             s,
-            (width as f32 - source.width() as f32 * s) / 2.,
-            (height as f32 - source.height() as f32 * s) / 2.,
+            (width as f32 - sw * crop_width as f32 * s) / 2. - x as f32 * sw * s,
+            (height as f32 - sh * crop_height as f32 * s) / 2. - y as f32 * sh * s,
         ),
         None,
     );
@@ -1258,9 +1273,10 @@ mod tests {
     use super::*;
     #[test]
     fn output_geometry_matches_editor() {
-        assert_eq!(dimensions(1920, 1080, 1080, "9:16"), (1080, 1920));
-        assert_eq!(dimensions(1920, 1080, 2160, "16:9"), (3840, 2160));
-        assert_eq!(dimensions(1080, 1920, 720, "1:1"), (720, 720));
+        assert_eq!(dimensions(1920., 1080., 1080, "9:16"), (1080, 1920));
+        assert_eq!(dimensions(1920., 1080., 2160, "16:9"), (3840, 2160));
+        assert_eq!(dimensions(1080., 1920., 720, "1:1"), (720, 720));
+        assert_eq!(dimensions(960., 1080., 1080, "auto"), (1080, 1216));
     }
     #[test]
     fn camera_respects_instant_cuts() {

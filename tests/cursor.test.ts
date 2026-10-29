@@ -15,6 +15,8 @@ const hand = cursorImage({...defaults,cursorTheme:'macos'}, events[1]);
 assert.equal(hand.label, 'pointinghand-1');
 assert.equal(themeCursor('custom-1','pointinghand').group, 'custom-1');
 assert.equal(themeCursor('custom-1','ibeam').group, 'macos');
+assert.equal(themeCursor('macos','hand').id, themeCursor('macos','pointinghand').id);
+assert.equal(themeCursor('macos','text').id, themeCursor('macos','ibeam').id);
 for (const theme of cursorThemes) {
   const image = themeCursor(theme);
   const small = cursorDimensions(image, 16, 1000), large = cursorDimensions(image, 32, 1000);

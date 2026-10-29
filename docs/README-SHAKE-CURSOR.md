@@ -4,7 +4,7 @@
 
 Deixar a gravação mais viva quando o mouse se desloca, mantendo a leitura da interface. O efeito deve chamar atenção para a ação sem transformar o cursor em uma câmera tremida.
 
-Implementado no editor, nos projetos e na exportação. Novos projetos começam em Cinematic, com acompanhamento Equilibrado e antecipação de 30%. Projetos anteriores abrem com o shake do cursor desligado; selecione um perfil em **Animações** para ativá-lo.
+Implementado no editor, nos projetos e na exportação. Novos projetos começam em Cinematic, com acompanhamento Equilibrado, antecipação de 35% e motion blur direcional. A câmera segue o cursor com inércia, sem oscilação adicional. Tremor da câmera e resposta oscilatória do cursor vêm desligados; continuam disponíveis como efeitos opcionais em **Animações**. Configurações explícitas de projetos salvos são preservadas.
 
 ## Referências
 
@@ -56,6 +56,8 @@ O shake deve ser pequeno em relação ao cursor. Como ponto de partida:
 | Suave | 0,15% do quadro | 90 ms | tutoriais e suporte |
 | Cinematic | 0,25% do quadro | 120 ms | demos de produto |
 | Dynamic | 0,35% do quadro | 150 ms | vídeos curtos e anúncios |
+
+Esses perfis de tremor são opcionais. O movimento padrão usa a trajetória suavizada com spring criticamente amortecido e blur direcional de 70% para deslocamentos e zooms, com cinco amostras em uma exposição de 1/60 s. O cursor usa blur de 25%. O rastro acompanha a velocidade e a direção e desaparece ao estabilizar, devolvendo a imagem nítida. Dynamic aumenta o blur da câmera para 90%; Smooth mantém a inércia sem blur de câmera.
 
 ### 3. Zoom que acompanha a intenção
 

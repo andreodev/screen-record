@@ -460,7 +460,8 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoD
 }
 
 struct Key: Codable { let t: Double; let x: Double; let y: Double; let scale: Double; var cut: Bool? = nil }
-struct Look: Codable { let background: Int; let padding: Double; let radius: Double; let shadow: Double; let cursorSize: Double; let smooth: Bool; let aspect: String; let cropFill: Bool?; let cropFollowCursor: Bool?; let cameraMode: String?; let colors: [String]?; let backgroundMode: String?; let cursorSmooth: Bool?; let wallpaper: String?; let cursorAsset: String?; let cursorTheme: String?; let backgroundBlur: Double?; let motionBlur: MotionBlur?; let clickSounds: Bool?; var hideIdleCursor: Bool? = nil; var clickEffect: String? = nil; let clickSoundVolume: Double?; var cameraMotion: CameraMotion? = nil }
+struct SourceCrop: Codable { let x: Double; let y: Double; let width: Double; let height: Double }
+struct Look: Codable { let background: Int; let padding: Double; let radius: Double; let shadow: Double; let cursorSize: Double; let smooth: Bool; let aspect: String; var crop: SourceCrop? = nil; let cropFill: Bool?; let cropFollowCursor: Bool?; let cameraMode: String?; let colors: [String]?; let backgroundMode: String?; let cursorSmooth: Bool?; let wallpaper: String?; let cursorAsset: String?; let cursorTheme: String?; let backgroundBlur: Double?; let motionBlur: MotionBlur?; let clickSounds: Bool?; var hideIdleCursor: Bool? = nil; var clickEffect: String? = nil; let clickSoundVolume: Double?; var cameraMotion: CameraMotion? = nil }
 struct CameraMotion: Codable { let intensity: Double; let duration: Double; let frequency: Double; let webcamShake: Bool?; let impacts: [Double]? }
 func webcamMotionState(_ state: WebcamKeyframe, _ time: Double, _ motion: CameraMotion?) -> WebcamKeyframe {
     guard let motion = motion, motion.webcamShake == true, let event = motion.impacts?.last(where: { $0 <= time }) else { return state }
@@ -698,7 +699,9 @@ func exportVideo(_ job: ExportJob, cancel: Cancellation) async throws {
     let natural = try await track.load(.naturalSize)
     let oriented = CGRect(origin: .zero, size: natural).applying(transform)
     let sw = abs(oriented.width), sh = abs(oriented.height)
-    let aspect = job.appearance.aspect == "16:9" ? 16.0 / 9 : job.appearance.aspect == "9:16" ? 9.0 / 16 : job.appearance.aspect == "1:1" ? 1 : sw / sh
+    let crop = job.appearance.crop ?? SourceCrop(x: 0, y: 0, width: 1, height: 1)
+    let cw = sw * crop.width, ch = sh * crop.height
+    let aspect = job.appearance.aspect == "16:9" ? 16.0 / 9 : job.appearance.aspect == "9:16" ? 9.0 / 16 : job.appearance.aspect == "1:1" ? 1 : cw / ch
     let shortEdge = Double(resolution), longEdge = shortEdge * 16 / 9
     let maxWidth = aspect >= 1 ? longEdge : shortEdge, maxHeight = aspect >= 1 ? shortEdge : longEdge
     let width = max(2, Int((min(maxWidth, maxHeight * aspect) / 2).rounded()) * 2)
@@ -707,10 +710,10 @@ func exportVideo(_ job: ExportJob, cancel: Cancellation) async throws {
     let padding = min(w, h) * job.appearance.padding / 100
     // Layout fit is the base composition. Camera scale is applied once, later,
     // to this fitted frame; the canvas crop is only the final clip rectangle.
-    let layoutScale = job.appearance.cropFill == true ? max((w - 2 * padding) / sw, (h - 2 * padding) / sh) : min((w - 2 * padding) / sw, (h - 2 * padding) / sh)
+    let layoutScale = job.appearance.cropFill == true ? max((w - 2 * padding) / cw, (h - 2 * padding) / ch) : min((w - 2 * padding) / cw, (h - 2 * padding) / ch)
     let vw = sw * layoutScale, vh = sh * layoutScale
-    let spanX = job.appearance.cropFill == true ? min(1, Double(w - 2 * padding) / Double(vw)) : 1
-    let spanY = job.appearance.cropFill == true ? min(1, Double(h - 2 * padding) / Double(vh)) : 1
+    let spanX = job.appearance.cropFill == true ? min(crop.width, Double(w - 2 * padding) / Double(vw)) : crop.width
+    let spanY = job.appearance.cropFill == true ? min(crop.height, Double(h - 2 * padding) / Double(vh)) : crop.height
     let radius = job.appearance.radius * w / 1000
     let palette = palettes[max(0, min(palettes.count - 1, job.appearance.background))]
     let first = job.appearance.colors?.first?.replacingOccurrences(of: "#", with: "") ?? palette.0
@@ -805,7 +808,7 @@ func exportVideo(_ job: ExportJob, cancel: Cancellation) async throws {
         cursorCatalog = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["cursors"] as? [[String: Any]] ?? []
     }
     func cursorStyle(_ kind: String?) throws -> (CIImage, Double, Double) {
-        let role = kind ?? "pointer", theme = job.appearance.cursorTheme ?? "macos"
+        let role = kind == "hand" ? "pointinghand" : kind == "text" ? "ibeam" : kind ?? "pointer", theme = job.appearance.cursorTheme ?? "macos"
         if let cached = cursorCache[role] { return cached }
         func match(_ group: String, _ role: String) -> String? { cursorCatalog.first { $0["group"] as? String == group && ($0["label"] as? String)?.hasPrefix(role + "-") == true }?["id"] as? String }
         let id = job.appearance.cursorTheme == nil ? job.appearance.cursorAsset ?? match(theme, role) ?? match(theme, "pointer") : match(theme, role) ?? match("macos", role) ?? match(theme, "pointer") ?? match("macos", "pointer")
@@ -864,7 +867,7 @@ func exportVideo(_ job: ExportJob, cancel: Cancellation) async throws {
             let samples = motionFrames(t, keys: job.keys, events: events, range: range, blur: job.appearance.motionBlur, cuts: cuts, spanX: spanX, spanY: spanY)
             let count = samples.count
             let frameCam = camera(t, job.keys)
-            let frameBounds = CGRect(x: w / 2 - frameCam.x * vw * frameCam.scale, y: h / 2 - (1 - frameCam.y) * vh * frameCam.scale, width: vw * frameCam.scale, height: vh * frameCam.scale)
+            let frameBounds = CGRect(x: w / 2 + (crop.x - frameCam.x) * vw * frameCam.scale, y: h / 2 + (frameCam.y - crop.y - crop.height) * vh * frameCam.scale, width: vw * crop.width * frameCam.scale, height: vh * crop.height * frameCam.scale)
             var accumulated: CIImage?
             for (sampleCamera, point) in samples {
                 var frame = sourceImage
@@ -923,9 +926,11 @@ func exportVideo(_ job: ExportJob, cancel: Cancellation) async throws {
             }
             var frameBackground = backgroundImage
             if job.appearance.backgroundMode == "video-blur" {
-                let backgroundScale = max(w / sw, h / sh)
-                let backgroundWidth = sw * backgroundScale, backgroundHeight = sh * backgroundScale
-                let expanded = sourceImage.transformed(by: CGAffineTransform(scaleX: backgroundScale, y: backgroundScale))
+                let backgroundScale = max(w / cw, h / ch)
+                let backgroundWidth = cw * backgroundScale, backgroundHeight = ch * backgroundScale
+                let croppedSource = sourceImage.cropped(to: CGRect(x: crop.x * sw, y: (1 - crop.y - crop.height) * sh, width: cw, height: ch))
+                    .transformed(by: CGAffineTransform(translationX: -crop.x * sw, y: -(1 - crop.y - crop.height) * sh))
+                let expanded = croppedSource.transformed(by: CGAffineTransform(scaleX: backgroundScale, y: backgroundScale))
                     .transformed(by: CGAffineTransform(translationX: (w - backgroundWidth) / 2, y: (h - backgroundHeight) / 2))
                 let blurred = expanded.clampedToExtent().applyingGaussianBlur(sigma: max(0, (job.appearance.backgroundBlur ?? 18) * w / 1920)).cropped(to: canvas)
                     .applyingFilter("CIColorMatrix", parameters: ["inputRVector": CIVector(x: 0.82, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: 0.82, z: 0, w: 0), "inputBVector": CIVector(x: 0, y: 0, z: 0.82, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0.9)])

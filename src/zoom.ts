@@ -1,3 +1,4 @@
+import type { CropRect } from './crop.ts';
 import type { CameraMotion, CursorResponse } from "./cinematic.ts";
 export type Point = { x: number; y: number };
 export type CursorEvent = Point & { t: number; down: boolean; rightDown?: boolean; middleDown?: boolean; kind?: string; typing?: boolean };
@@ -5,7 +6,7 @@ export type Zoom = Point & { id: string; start: number; end: number; scale: numb
 export type Camera = Point & { scale: number };
 export type CameraKey = Camera & { t: number; cut?: boolean };
 export type CameraFrame = { left: number; top: number; width: number; height: number };
-export type Appearance = { background: number; padding: number; radius: number; shadow: number; cursorSize: number; smooth: boolean; aspect: string; cropFill?: boolean; cropFollowCursor?: boolean; cameraMode?: "auto" | "manual" | "hybrid"; backgroundMode?: "gradient" | "color" | "wallpaper" | "video-blur"; colors?: [string, string]; cursorSmooth?: boolean; wallpaper?: string; cursorAsset?: string; cursorTheme?: string; backgroundBlur?: number; cursorMotion?: "original" | "smooth" | "medium" | "rapid"; cameraSpring?: boolean; cameraMotion?: CameraMotion; cursorResponse?: CursorResponse; cursorFollow?: "off" | "balanced" | "close"; zoomAnticipation?: number; motionBlur?: { cursor: number; zoom: number; pan: number }; hideIdleCursor?: boolean; clickEffect?: "none" | "circle" | "ripple"; clickSounds?: boolean; clickSoundVolume?: number };
+export type Appearance = { background: number; padding: number; radius: number; shadow: number; cursorSize: number; smooth: boolean; aspect: string; crop?: CropRect; cropFill?: boolean; cropFollowCursor?: boolean; cameraMode?: "auto" | "manual" | "hybrid"; backgroundMode?: "gradient" | "color" | "wallpaper" | "video-blur"; colors?: [string, string]; cursorSmooth?: boolean; wallpaper?: string; cursorAsset?: string; cursorTheme?: string; backgroundBlur?: number; cursorMotion?: "original" | "smooth" | "medium" | "rapid"; cameraSpring?: boolean; cameraMotion?: CameraMotion; cursorResponse?: CursorResponse; cursorFollow?: "off" | "balanced" | "close"; zoomAnticipation?: number; motionBlur?: { cursor: number; zoom: number; pan: number }; hideIdleCursor?: boolean; clickEffect?: "none" | "circle" | "ripple"; clickSounds?: boolean; clickSoundVolume?: number };
 export function cursorMotionFor(appearance: Appearance): NonNullable<Appearance["cursorMotion"]> {
   return appearance.cursorMotion ?? (appearance.cursorSmooth === false ? "original" : "medium");
 }
@@ -13,7 +14,7 @@ export const backgrounds = [
   ["#25243d", "#7c6a9e"], ["#112e3b", "#45a7ac"], ["#512e53", "#eb9a89"],
   ["#182b33", "#538367"], ["#171719", "#35353c"], ["#6b3e81", "#d574ae"],
 ];
-export const defaults: Appearance = { background: 0, padding: 9, radius: 12, shadow: 35, cursorSize: 24, cursorTheme: "macos", smooth: true, aspect: "auto", cameraMode: "hybrid", cursorResponse: { style: "cinematic", intensity: 1, directionImpact: true }, cursorFollow: "balanced", zoomAnticipation: .3, clickSounds: true, clickSoundVolume: 0.3 };
+export const defaults: Appearance = { background: 0, padding: 9, radius: 12, shadow: 35, cursorSize: 24, cursorTheme: "macos", smooth: true, aspect: "auto", cameraMode: "hybrid", cursorResponse: { style: "off", intensity: 1, directionImpact: false }, cursorFollow: "balanced", zoomAnticipation: .35, motionBlur: { cursor: .25, zoom: 1, pan: 1 }, clickSounds: true, clickSoundVolume: 0.3 };
 export const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 /** Maps the complete recording layer into the final canvas around a source-space focus point. */
 export function cameraFrame(camera: Camera, frameWidth: number, frameHeight: number, canvasWidth: number, canvasHeight: number): CameraFrame {
@@ -181,7 +182,7 @@ export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, eve
         const targetPoint = nextPoint ? { x: clamp(point.x + (nextPoint.x - point.x) * lead, 0, 1), y: clamp(point.y + (nextPoint.y - point.y) * lead, 0, 1) } : point;
         const zoneX = (closeFollow ? .08 : .1) * cameraSpanX(zoom.scale), zoneY = (closeFollow ? .08 : .1) * cameraSpanY(zoom.scale);
         const dx = targetPoint.x - item.focus.x, dy = targetPoint.y - item.focus.y;
-        const followAlpha = 1 - Math.exp(-Math.max(0, t - previousFrameTime) / (closeFollow ? .08 : smooth ? .16 : .09));
+        const followAlpha = 1 - Math.exp(-Math.max(0, t - previousFrameTime) / (closeFollow ? .08 : smooth ? .12 : .09));
         item.focus.x += Math.sign(dx) * Math.max(0, Math.abs(dx) - zoneX) * followAlpha;
         item.focus.y += Math.sign(dy) * Math.max(0, Math.abs(dy) - zoneY) * followAlpha;
         zoom = { ...zoom, ...item.focus };
@@ -226,7 +227,7 @@ export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, eve
       }
     }
     const dt = Math.max(0, t - previousFrameTime);
-    const amount = 1 - Math.exp(-dt / (smooth ? .24 : .14));
+    const amount = 1 - Math.exp(-dt / (smooth ? .2 : .14));
     if (active.some(item => item.zoom.instant) || cuts.has(t)) cameraState = target;
     else {
       cameraState = {

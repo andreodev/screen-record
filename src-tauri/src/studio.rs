@@ -18,12 +18,14 @@ pub(crate) struct Media {
 struct Pointer { t: f64, x: f64, y: f64, down: bool, #[serde(default, skip_serializing_if = "Option::is_none")] kind: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] right_down: Option<bool>, #[serde(default, skip_serializing_if = "Option::is_none")] middle_down: Option<bool>, #[serde(default, skip_serializing_if = "Option::is_none")] typing: Option<bool> }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Appearance { background: usize, padding: f64, radius: f64, shadow: f64, cursor_size: f64, smooth: bool, aspect: String, #[serde(default)] crop_fill: Option<bool>, #[serde(default)] crop_follow_cursor: Option<bool>, #[serde(default)] camera_mode: Option<String>, colors: Option<[String; 2]>, background_mode: Option<String>, cursor_smooth: Option<bool>, wallpaper: Option<String>, cursor_asset: Option<String>, cursor_theme: Option<String>, background_blur: Option<f64>, cursor_motion: Option<String>, camera_spring: Option<bool>, #[serde(default, skip_serializing_if = "Option::is_none")] cursor_response: Option<CursorResponse>, #[serde(default, skip_serializing_if = "Option::is_none")] cursor_follow: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] zoom_anticipation: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] camera_motion: Option<CameraMotion>, motion_blur: Option<MotionBlur>, #[serde(default)] hide_idle_cursor: Option<bool>, click_effect: Option<String>, click_sounds: Option<bool>, #[serde(default)] click_sound_volume: Option<f64> }
+struct Appearance { background: usize, padding: f64, radius: f64, shadow: f64, cursor_size: f64, smooth: bool, aspect: String, #[serde(default, skip_serializing_if = "Option::is_none")] crop: Option<CropRect>, #[serde(default)] crop_fill: Option<bool>, #[serde(default)] crop_follow_cursor: Option<bool>, #[serde(default)] camera_mode: Option<String>, colors: Option<[String; 2]>, background_mode: Option<String>, cursor_smooth: Option<bool>, wallpaper: Option<String>, cursor_asset: Option<String>, cursor_theme: Option<String>, background_blur: Option<f64>, cursor_motion: Option<String>, camera_spring: Option<bool>, #[serde(default, skip_serializing_if = "Option::is_none")] cursor_response: Option<CursorResponse>, #[serde(default, skip_serializing_if = "Option::is_none")] cursor_follow: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] zoom_anticipation: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] camera_motion: Option<CameraMotion>, motion_blur: Option<MotionBlur>, #[serde(default)] hide_idle_cursor: Option<bool>, click_effect: Option<String>, click_sounds: Option<bool>, #[serde(default)] click_sound_volume: Option<f64> }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Zoom { id: String, start: f64, end: f64, x: f64, y: f64, scale: f64, enabled: bool, #[serde(default)] follow: bool, #[serde(default)] instant: bool, #[serde(default)] manual_override: bool, #[serde(default, skip_serializing_if = "Option::is_none")] roi_width: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] roi_height: Option<f64> }
 #[derive(Clone, Serialize, Deserialize)]
 struct Trim { start: f64, end: f64 }
+#[derive(Clone, Serialize, Deserialize)]
+struct CropRect { x: f64, y: f64, width: f64, height: f64 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CursorResponse { style: String, intensity: f64, direction_impact: bool }
@@ -214,6 +216,7 @@ fn valid_webcam(camera: &Webcam, duration: f64) -> bool {
         && camera.layouts.as_ref().is_none_or(|layouts| [layouts.portrait.as_ref(), layouts.landscape.as_ref()].into_iter().flatten().all(|layout| valid_webcam_layout(layout, camera, duration)))
 }
 fn validate_appearance(a: &Appearance) -> Result<(), String> {
+    if a.crop.as_ref().is_some_and(|c| !bounded(c.x, 0., 1.) || !bounded(c.y, 0., 1.) || !bounded(c.width, 0.01, 1.) || !bounded(c.height, 0.01, 1.) || c.x + c.width > 1.000001 || c.y + c.height > 1.000001) { return Err("Recorte inválido: selecione uma área dentro do vídeo.".into()); }
     if a.cursor_response.as_ref().is_some_and(|r| !["off", "smooth", "cinematic", "dynamic"].contains(&r.style.as_str()) || !bounded(r.intensity, 0., 1.))
         || a.cursor_follow.as_deref().is_some_and(|v| !["off", "balanced", "close"].contains(&v))
         || a.zoom_anticipation.is_some_and(|v| !bounded(v, 0., 0.35)) { return Err("Resposta ao movimento do cursor inválida.".into()); }
@@ -291,7 +294,7 @@ fn read_document_manifest(path: &Path, manifest: &Path) -> Result<(Project, Path
     let package = path.is_dir();
     if std::fs::metadata(manifest).map_err(|e| format!("Projeto não encontrado: {e}"))?.len() > 10_000_000 { return Err("Projeto maior que o limite de 10 MB.".into()); }
     let project: Project = serde_json::from_slice(&std::fs::read(&manifest).map_err(|e| e.to_string())?).map_err(|e| format!("Projeto inválido: {e}"))?;
-    if !(1..=13).contains(&project.version) { return Err("Versão do projeto não suportada. Atualize o Frame Studio.".into()); }
+    if !(1..=14).contains(&project.version) { return Err("Versão do projeto não suportada. Atualize o Frame Studio.".into()); }
     let source = PathBuf::from(&project.media_path);
     if package && (source.is_absolute() || source.components().any(|p| matches!(p, std::path::Component::ParentDir))) { return Err("O pacote deve usar uma mídia interna.".into()); }
     let source = if source.is_absolute() { source } else { manifest.parent().ok_or("Pasta de projeto inválida.")?.join(source) };
@@ -405,7 +408,7 @@ fn write_manifest(package: &Path, project: &Project, source: &Path) -> Result<()
     let package = package.canonicalize().map_err(|e| e.to_string())?;
     let source = source.canonicalize().map_err(|e| e.to_string())?;
     let relative = source.strip_prefix(&package).map_err(|_| "A mídia deve estar dentro do pacote.")?;
-    let mut document = project.clone(); document.version = if document.appearance.cursor_response.is_some() || document.appearance.cursor_follow.is_some() || document.appearance.zoom_anticipation.is_some() { 13 } else if document.effects.as_ref().is_some_and(|effects| !effects.is_empty()) || document.appearance.hide_idle_cursor.is_some() || document.appearance.click_effect.is_some() { 12 } else if document.microphone.is_some() || document.source_volume.is_some() { 11 } else if document.webcam.as_ref().is_some_and(|camera| !camera.keyframes.is_empty() || camera.layouts.is_some() || camera.mode.is_some()) { 11 } else if document.appearance.click_sounds.is_some() || document.appearance.click_sound_volume.is_some() { 9 } else if document.webcam.is_some() { 8 } else if document.appearance.camera_mode.is_some() || document.appearance.crop_follow_cursor == Some(true) { 7 } else if document.background_audio.is_some() { 6 } else if document.appearance.motion_blur.is_some() || document.zooms.iter().any(|z| z.instant) || document.clips.as_ref().is_some_and(|clips| clips.iter().any(|c| c.speed.is_some() || c.hide_cursor.is_some() || c.cursor_original.is_some())) { 4 } else if document.clips.is_some() { 3 } else { 2 }; document.media_path = relative.components().map(|part| part.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
+    let mut document = project.clone(); document.version = if document.appearance.crop.is_some() { 14 } else if document.appearance.cursor_response.is_some() || document.appearance.cursor_follow.is_some() || document.appearance.zoom_anticipation.is_some() { 13 } else if document.effects.as_ref().is_some_and(|effects| !effects.is_empty()) || document.appearance.hide_idle_cursor.is_some() || document.appearance.click_effect.is_some() { 12 } else if document.microphone.is_some() || document.source_volume.is_some() { 11 } else if document.webcam.as_ref().is_some_and(|camera| !camera.keyframes.is_empty() || camera.layouts.is_some() || camera.mode.is_some()) { 11 } else if document.appearance.click_sounds.is_some() || document.appearance.click_sound_volume.is_some() { 9 } else if document.webcam.is_some() { 8 } else if document.appearance.camera_mode.is_some() || document.appearance.crop_follow_cursor == Some(true) { 7 } else if document.background_audio.is_some() { 6 } else if document.appearance.motion_blur.is_some() || document.zooms.iter().any(|z| z.instant) || document.clips.as_ref().is_some_and(|clips| clips.iter().any(|c| c.speed.is_some() || c.hide_cursor.is_some() || c.cursor_original.is_some())) { 4 } else if document.clips.is_some() { 3 } else { 2 }; document.media_path = relative.components().map(|part| part.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
     for (kind, audio) in [("background", &mut document.background_audio), ("microphone", &mut document.microphone)] {
         let Some(audio) = audio else { continue };
         let source = Path::new(&audio.path).canonicalize().map_err(|e| format!("Trilha de áudio não encontrada: {e}"))?;
@@ -555,7 +558,7 @@ fn spawn_operation(app: tauri::AppHandle, kind: &'static str, arg: PathBuf, clea
                 let mut media = load_media(&app, &arg)?;
                 if let Some(camera_path) = &webcam { if camera_path.is_file() { media.webcam_path = Some(camera_path.canonicalize().map_err(|e| e.to_string())?.to_string_lossy().into_owned()); app.asset_protocol_scope().allow_file(camera_path).map_err(|e| e.to_string())?; } }
                 if let Some(package) = arg.parent().and_then(|p| p.parent()) {
-                let initial = Project { version: 13, name: "Nova gravação".into(), media_path: media.path.clone(), zooms: vec![], appearance: Appearance { background: 0, padding: 9., radius: 12., shadow: 35., cursor_size: 24., smooth: true, aspect: "auto".into(), crop_fill: None, crop_follow_cursor: None, camera_mode: None, colors: None, background_mode: None, cursor_smooth: None, wallpaper: None, cursor_asset: None, cursor_theme: None, background_blur: None, cursor_motion: None, camera_spring: None, camera_motion: None, cursor_response: Some(CursorResponse { style: "cinematic".into(), intensity: 1., direction_impact: true }), cursor_follow: Some("balanced".into()), zoom_anticipation: Some(0.3), motion_blur: None, hide_idle_cursor: None, click_effect: None, click_sounds: Some(true), click_sound_volume: Some(0.3) }, trim: Trim { start: 0., end: media.duration }, clips: None, effects: None, background_audio: None, microphone: media.microphone_path.as_ref().map(|path| BackgroundAudio { path: path.clone(), volume: 1. }), source_volume: None, webcam: media.webcam_path.as_ref().map(|path| Webcam { zoom_behavior: None, zoom_size: None, transition_duration: None, path: path.clone(), x: 0.78, y: 0.78, size: 0.24, shape: "circle".into(), keyframes: vec![], mode: None, opacity: None, border: None, shadow: None, border_radius: None, layouts: None }) };
+                let initial = Project { version: 13, name: "Nova gravação".into(), media_path: media.path.clone(), zooms: vec![], appearance: Appearance { background: 0, padding: 9., radius: 12., shadow: 35., cursor_size: 24., smooth: true, aspect: "auto".into(), crop: None, crop_fill: None, crop_follow_cursor: None, camera_mode: None, colors: None, background_mode: None, cursor_smooth: None, wallpaper: None, cursor_asset: None, cursor_theme: None, background_blur: None, cursor_motion: None, camera_spring: None, camera_motion: None, cursor_response: Some(CursorResponse { style: "cinematic".into(), intensity: 1., direction_impact: true }), cursor_follow: Some("balanced".into()), zoom_anticipation: Some(0.3), motion_blur: None, hide_idle_cursor: None, click_effect: None, click_sounds: Some(true), click_sound_volume: Some(0.3) }, trim: Trim { start: 0., end: media.duration }, clips: None, effects: None, background_audio: None, microphone: media.microphone_path.as_ref().map(|path| BackgroundAudio { path: path.clone(), volume: 1. }), source_volume: None, webcam: media.webcam_path.as_ref().map(|path| Webcam { zoom_behavior: None, zoom_size: None, transition_duration: None, path: path.clone(), x: 0.78, y: 0.78, size: 0.24, shape: "circle".into(), keyframes: vec![], mode: None, opacity: None, border: None, shadow: None, border_radius: None, layouts: None }) };
                     write_manifest(package, &initial, &arg)?;
                     *app.state::<Recorder>().project_path.lock().map_err(|e| e.to_string())? = Some(package.to_path_buf());
                     preview_package(&app, package, &arg);
@@ -726,7 +729,7 @@ mod tests {
     #[test] fn validates_edit_boundaries() {
         assert!(validate_trim(0., 2., 2.).is_ok());
         for (start, end) in [(1., 0.), (-1., 1.), (0., 3.), (f64::NAN, 1.), (0., 0.01)] { assert!(validate_trim(start, end, 2.).is_err()); }
-        let mut a = Appearance { background: 0, padding: 9., radius: 12., shadow: 35., cursor_size: 24., smooth: true, aspect: "auto".into(), crop_fill: None, crop_follow_cursor: None, camera_mode: None, colors: None, background_mode: None, cursor_smooth: None, wallpaper: None, cursor_asset: None, cursor_theme: None, background_blur: None, cursor_motion: None, camera_spring: None, camera_motion: None, cursor_response: None, cursor_follow: None, zoom_anticipation: None, motion_blur: None, hide_idle_cursor: None, click_effect: None, click_sounds: Some(true), click_sound_volume: Some(0.3) };
+        let mut a = Appearance { background: 0, padding: 9., radius: 12., shadow: 35., cursor_size: 24., smooth: true, aspect: "auto".into(), crop: None, crop_fill: None, crop_follow_cursor: None, camera_mode: None, colors: None, background_mode: None, cursor_smooth: None, wallpaper: None, cursor_asset: None, cursor_theme: None, background_blur: None, cursor_motion: None, camera_spring: None, camera_motion: None, cursor_response: None, cursor_follow: None, zoom_anticipation: None, motion_blur: None, hide_idle_cursor: None, click_effect: None, click_sounds: Some(true), click_sound_volume: Some(0.3) };
         assert!(validate_appearance(&a).is_ok()); a.padding = f64::INFINITY; assert!(validate_appearance(&a).is_err());
         a.padding = 9.;
         a.camera_mode = Some("hybrid".into()); assert!(validate_appearance(&a).is_ok());
@@ -748,13 +751,19 @@ mod tests {
         a.cursor_follow = Some("random".into()); assert!(validate_appearance(&a).is_err());
         a.cursor_follow = Some("off".into()); a.zoom_anticipation = Some(0.36); assert!(validate_appearance(&a).is_err());
         a.zoom_anticipation = Some(0.); assert!(validate_appearance(&a).is_ok());
+        a.crop = Some(CropRect { x: 0.2, y: 0.1, width: 0.5, height: 0.6 });
+        assert!(validate_appearance(&a).is_ok());
+        a.crop.as_mut().unwrap().width = 0.; assert!(validate_appearance(&a).is_err());
+        a.crop.as_mut().unwrap().width = 0.9; assert!(validate_appearance(&a).is_err());
+        a.crop.as_mut().unwrap().width = 0.5;
+        a.crop.as_mut().unwrap().x = f64::NAN; assert!(validate_appearance(&a).is_err());
     }
     #[test] fn project_package_moves_with_its_media_and_keeps_a_backup() {
         let folder = std::env::temp_dir().join(format!("frame-package-test-{}", timestamp().unwrap()));
         std::fs::create_dir(&folder).unwrap();
         let original = folder.join("original.mov"); std::fs::write(&original, b"synthetic-video").unwrap();
         let media = Media { path: original.to_string_lossy().into_owned(), duration: 3., width: 1280, height: 800, cursor: vec![Pointer { t: 0., x: 0.5, y: 0.5, down: false, kind: None, right_down: Some(true), middle_down: Some(false), typing: None }], cursor_captured: true, has_audio: false, webcam_path: None, microphone_path: None };
-        let mut project = Project { version: 1, name: "Example".into(), media_path: media.path.clone(), zooms: vec![], appearance: Appearance { background: 0, padding: 9., radius: 12., shadow: 35., cursor_size: 24., smooth: true, aspect: "auto".into(), crop_fill: None, crop_follow_cursor: None, camera_mode: None, colors: None, background_mode: None, cursor_smooth: None, wallpaper: None, cursor_asset: None, cursor_theme: None, background_blur: None, cursor_motion: None, camera_spring: None, camera_motion: None, cursor_response: None, cursor_follow: None, zoom_anticipation: None, motion_blur: None, hide_idle_cursor: None, click_effect: None, click_sounds: None, click_sound_volume: None }, trim: Trim { start: 0., end: 3. }, clips: None, effects: None, background_audio: None, microphone: None, source_volume: None, webcam: None };
+        let mut project = Project { version: 1, name: "Example".into(), media_path: media.path.clone(), zooms: vec![], appearance: Appearance { background: 0, padding: 9., radius: 12., shadow: 35., cursor_size: 24., smooth: true, aspect: "auto".into(), crop: None, crop_fill: None, crop_follow_cursor: None, camera_mode: None, colors: None, background_mode: None, cursor_smooth: None, wallpaper: None, cursor_asset: None, cursor_theme: None, background_blur: None, cursor_motion: None, camera_spring: None, camera_motion: None, cursor_response: None, cursor_follow: None, zoom_anticipation: None, motion_blur: None, hide_idle_cursor: None, click_effect: None, click_sounds: None, click_sound_volume: None }, trim: Trim { start: 0., end: 3. }, clips: None, effects: None, background_audio: None, microphone: None, source_volume: None, webcam: None };
         project.clips = Some(vec![Clip { start: 0., end: 0.5, ..Default::default() }, Clip { start: 1., end: 3., ..Default::default() }]);
         let package = folder.join("Example.framestudio");
         create_package(&package, &project, &media).unwrap();
@@ -858,6 +867,12 @@ mod tests {
         assert_eq!(response.style, "dynamic"); assert_eq!(response.intensity, 0.65); assert!(!response.direction_impact);
         assert_eq!(restored.appearance.cursor_follow.as_deref(), Some("close")); assert_eq!(restored.appearance.zoom_anticipation, Some(0.25));
         assert_eq!(restored.zooms[0].roi_width, Some(0.3)); assert_eq!(restored.zooms[0].roi_height, Some(0.64));
+        project.appearance.crop = Some(CropRect { x: 0.25, y: 0.1, width: 0.5, height: 0.6 });
+        write_manifest(&moved, &project, &source).unwrap();
+        let cropped = read_document(&moved).unwrap().0;
+        assert_eq!(cropped.version, 14);
+        let crop = cropped.appearance.crop.unwrap();
+        assert_eq!((crop.x, crop.y, crop.width, crop.height), (0.25, 0.1, 0.5, 0.6));
         let mut escaped = project.clone(); escaped.media_path = "../outside.mov".into();
         atomic_json(&moved.join("project.json"), &escaped).unwrap();
         assert!(read_document(&moved).is_err(), "Packages cannot reach external media");

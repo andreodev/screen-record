@@ -92,6 +92,29 @@ try {
   assert(green > 1000, `Webcam pixels missing: ${green}`);
   console.log('Composition: vertical, webcam pixels, masks, highlights, motion blur, music and microphone mix passed.');
 
+  // The selected right half is blue; the excluded left half must never appear.
+  const splitSource = join(folder, 'split.mp4');
+  run('-f', 'lavfi', '-i', 'color=c=red:size=320x180:rate=24,drawbox=x=160:y=0:w=160:h=180:color=blue:t=fill', '-t', '1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', splitSource);
+  const croppedOutput = join(folder, 'cropped.mp4');
+  const croppedJob = makeJob(croppedOutput, {
+    source: splitSource, start: 0, end: 1, ranges: [{ start: 0, end: .25, speed: 1 }],
+    cursor: [], rawCursor: [], cursorCaptured: false,
+    keys: [{ t: 0, x: .75, y: .5, scale: 1 }, { t: 1, x: .75, y: .5, scale: 1 }],
+  });
+  Object.assign(croppedJob.appearance, { aspect: 'auto', padding: 0, radius: 0, shadow: 0, crop: { x: .5, y: 0, width: .5, height: 1 } });
+  result = await exportJob(croppedJob); assert.equal(result.code, 0, JSON.stringify(result));
+  info = probe(croppedOutput);
+  assert.equal(info.streams[0].width, 480); assert.equal(info.streams[0].height, 540);
+  const croppedPixels = run('-i', croppedOutput, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1');
+  let red = 0, blue = 0;
+  for (let i = 0; i < croppedPixels.length; i += 3) {
+    if (croppedPixels[i] > 150 && croppedPixels[i + 2] < 60) red++;
+    if (croppedPixels[i + 2] > 150 && croppedPixels[i] < 60) blue++;
+  }
+  assert.equal(red, 0, 'Excluded source pixels leaked into the crop');
+  assert(blue > 480 * 540 * .98, `Selected source pixels missing: ${blue}`);
+  console.log('Crop export: off-center selection, output aspect and selected/excluded pixels passed.');
+
   const sentinel = join(folder, 'cancelled.mp4'); writeFileSync(sentinel, 'preserve-existing-destination');
   result = await exportJob(makeJob(sentinel), (event, child) => { if (event.event === 'progress') child.stdin.end('stop\n'); });
   assert.notEqual(result.code, 0); assert(result.events.some(e => e.event === 'error' && /cancelada/i.test(e.message)));

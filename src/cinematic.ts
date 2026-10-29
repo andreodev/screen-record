@@ -68,15 +68,15 @@ export type CameraMotion = {
 };
 export const motionPresets: Record<CameraMotion['style'], CameraMotion> = {
   smooth: { style: 'smooth', shake: false, intensity: .001, duration: .12, frequency: 12, spring: true, damping: 1.05, blur: false, blurIntensity: .15 },
-  cinematic: { style: 'cinematic', shake: true, intensity: .0018, duration: .14, frequency: 12, spring: true, damping: .95, blur: true, blurIntensity: .18 },
-  dynamic: { style: 'dynamic', shake: true, intensity: .0032, duration: .17, frequency: 10, spring: true, damping: .85, blur: true, blurIntensity: .3 },
+  cinematic: { style: 'cinematic', shake: false, intensity: .0018, duration: .14, frequency: 12, spring: true, damping: 1, blur: true, blurIntensity: .7 },
+  dynamic: { style: 'dynamic', shake: false, intensity: .0032, duration: .17, frequency: 10, spring: true, damping: .95, blur: true, blurIntensity: .9 },
 };
 export function cameraMotionFor(look: Appearance): CameraMotion {
   return look.cameraMotion ?? { ...motionPresets.cinematic, spring: look.cameraSpring ?? true };
 }
 export function cameraMotionBlur(look: Appearance): NonNullable<Appearance['motionBlur']> {
   const settings = cameraMotionFor(look), blur = look.motionBlur;
-  return { cursor: blur?.cursor ?? 0, zoom: settings.blur ? Math.min(.5, settings.blurIntensity * (blur?.zoom ?? 1)) : 0, pan: settings.blur ? Math.min(.5, settings.blurIntensity * (blur?.pan ?? 1)) : 0 };
+  return { cursor: blur?.cursor ?? 0, zoom: settings.blur ? clamp(settings.blurIntensity * (blur?.zoom ?? 1), 0, 1) : 0, pan: settings.blur ? clamp(settings.blurIntensity * (blur?.pan ?? 1), 0, 1) : 0 };
 }
 /** Detect actual motion episodes, never clicks. Refractory spacing prevents stacked impacts. */
 export function motionImpacts(keys: CameraKey[], manual: number[] = []) {
