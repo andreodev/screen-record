@@ -42,6 +42,8 @@ strip = true
 # Keep the CPU compositor usable in development builds as well.
 [profile.dev.package.screen-studio]
 opt-level = 2
+# Avoid the unresolved MSVC symbols seen when reusing optimized incremental objects.
+incremental = false
 [profile.dev.package.tiny-skia]
 opt-level = 3
 [profile.dev.package.tiny-skia-path]

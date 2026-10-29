@@ -602,6 +602,7 @@ fn record(path: &Path, webcam: Option<&Path>, system_audio: bool, microphone: bo
     });
     let mut face = None;
     let mut events = Vec::new();
+    let mut typing = crate::typing::TypingActivity::default();
     let mut seconds = 0.;
     let mut begun = None;
     let launched = Instant::now();
@@ -700,9 +701,10 @@ fn record(path: &Path, webcam: Option<&Path>, system_audio: bool, microphone: bo
                 GetCursorInfo(&mut info);
             }
             let pressed = |key: u16| unsafe { GetAsyncKeyState(key as i32) < 0 };
+            let time = now.elapsed().as_secs_f64();
             region.update();
             events.push(Pointer {
-                t: now.elapsed().as_secs_f64(),
+                t: time,
                 x: ((point.x - region.x) as f64 / width as f64).clamp(0., 1.),
                 y: ((point.y - region.y) as f64 / height as f64).clamp(0., 1.),
                 down: pressed(VK_LBUTTON),
@@ -718,7 +720,7 @@ fn record(path: &Path, webcam: Option<&Path>, system_audio: bool, microphone: bo
                     }
                     .into(),
                 ),
-                typing: false,
+                typing: typing.sample(time, pressed),
             });
         } else if launched.elapsed() > Duration::from_secs(20) {
             return Err("A captura do desktop não iniciou em 20 segundos.".into());

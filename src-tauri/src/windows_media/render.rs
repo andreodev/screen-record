@@ -657,7 +657,7 @@ impl Renderer {
                 Transform::identity(),
             );
             if effect["kind"] == "mask" {
-                let blur = blurred(&layer, (14. * w / 1920.) as f32)?;
+                let blur = blurred(&layer, (24. * w / 1920.) as f32)?;
                 layer.draw_pixmap(
                     0,
                     0,

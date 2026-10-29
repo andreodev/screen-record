@@ -11,6 +11,7 @@ import {
   type Suggestion,
 } from "./pacing";
 import { parseSrt } from "./subtitles";
+import { playMedia, playbackInterrupted } from "./playback";
 import { CaptureSettings, type CaptureSelection } from "./CaptureSettings";
 import { CropDialog } from "./CropDialog";
 import { cropPoint, sourcePoint, normalizedCrop } from "./crop";
@@ -1063,7 +1064,7 @@ export default function App() {
         element.hidden = !active;
         element.style.setProperty(
           "--mask-blur",
-          `${(14 * data.sceneWidth) / 1920 / cam.scale}px`,
+          `${(24 * data.sceneWidth) / 1920 / cam.scale}px`,
         );
         element.style.borderRadius = `${(8 * data.sceneWidth) / 1920}px`;
         const loupe = element.querySelector("canvas"),
@@ -1615,11 +1616,10 @@ export default function App() {
         if (voice && p.microphone) {
           voice.currentTime = element.currentTime;
           voice.playbackRate = element.playbackRate;
-          void voice.play().catch((e) => setError(String(e)));
         }
-        await element.play();
+        await playMedia(element, (e) => setError(String(e)));
       } catch (e) {
-        setError(String(e));
+        if (!playbackInterrupted(e)) setError(String(e));
       }
     } else element.pause();
   }, [rate]);
@@ -2396,7 +2396,12 @@ export default function App() {
   }
   function addEffect(kind: Effect["kind"]) {
     if (!project || !media || busy) return;
-    const start = clamp(time, 0, Math.max(0, media.duration - 0.1));
+    const start = clamp(video.current?.currentTime ?? time, 0, Math.max(0, media.duration - 0.1));
+    video.current?.pause();
+    const focus = (kind === "spotlight" ? cursorAt(start, media.cursor) : null)
+      ?? cameraFromKeys(start, trajectory);
+    const effectWidth = Math.max(0.02, 0.28 * sourceCrop.width);
+    const effectHeight = Math.max(0.02, 0.22 * sourceCrop.height);
     const effect: Effect = {
       id: crypto.randomUUID(),
       kind,
@@ -2410,22 +2415,22 @@ export default function App() {
           ? 0.83
           : canvasEffect(kind)
             ? 0.5
-            : sourceCrop.x + sourceCrop.width / 2,
+            : clamp(focus.x, sourceCrop.x + effectWidth / 2, sourceCrop.x + sourceCrop.width - effectWidth / 2),
       y:
         kind === "caption"
           ? 0.87
           : kind === "watermark"
             ? 0.08
-            : sourceCrop.y + sourceCrop.height / 2,
+            : clamp(focus.y, sourceCrop.y + effectHeight / 2, sourceCrop.y + sourceCrop.height - effectHeight / 2),
       width:
         kind === "caption"
           ? 0.8
           : canvasEffect(kind)
             ? 0.28
-            : Math.max(0.02, 0.28 * sourceCrop.width),
+            : effectWidth,
       height: canvasEffect(kind)
         ? 0.12
-        : Math.max(0.02, 0.22 * sourceCrop.height),
+        : effectHeight,
       opacity: kind === "highlight" ? 0.28 : kind === "spotlight" ? 0.65 : 1,
       ...(["text", "caption", "watermark"].includes(kind)
         ? { text: kind === "watermark" ? "Sua marca" : "Seu texto" }
@@ -2440,6 +2445,7 @@ export default function App() {
     setSelectedClip(null);
     setSelectedEffect(effect.id);
     setPanel("effect");
+    seek(start);
   }
   function dragEffect(
     event: React.PointerEvent<HTMLElement>,
@@ -3333,22 +3339,18 @@ export default function App() {
                         onLoadedData={() =>
                           draw(video.current?.currentTime ?? 0)
                         }
-                        onPlay={() => {
+                        onPlay={(event) => {
+                          if (event.currentTarget.paused) return;
                           setPlaying(true);
                           if (projectRef.current?.webcam)
-                            void webcamVideo.current
-                              ?.play()
-                              .catch((e) => setError(String(e)));
+                            void playMedia(webcamVideo.current, (e) => setError(String(e)));
                           if (projectRef.current?.microphone)
-                            void microphoneAudio.current
-                              ?.play()
-                              .catch((e) => setError(String(e)));
+                            void playMedia(microphoneAudio.current, (e) => setError(String(e)));
                           if (projectRef.current?.backgroundAudio)
-                            void audio.current
-                              ?.play()
-                              .catch((e) => setError(String(e)));
+                            void playMedia(audio.current, (e) => setError(String(e)));
                         }}
-                        onPause={() => {
+                        onPause={(event) => {
+                          if (!event.currentTarget.paused) return;
                           setPlaying(false);
                           audio.current?.pause();
                           microphoneAudio.current?.pause();
@@ -3566,7 +3568,8 @@ export default function App() {
                             setWebcamSourceAspect(v.videoWidth / v.videoHeight);
                             if (video.current) {
                               v.currentTime = video.current.currentTime;
-                              if (!video.current.paused) void v.play();
+                              if (!video.current.paused)
+                                void playMedia(v, (error) => setError(String(error)));
                             }
                           }}
                         />
@@ -3984,7 +3987,7 @@ export default function App() {
             {panel === "zoom" && (
               <>
                 <div className="panel-title">
-                  <h2>Zooms dinâmicos</h2>
+                  <h2>Zoom automático</h2>
                   <span>
                     {cameraMode === "hybrid"
                       ? "Automático, com edição manual"
@@ -4015,6 +4018,9 @@ export default function App() {
                     </button>
                   ))}
                 </div>
+                {cameraMode !== "manual" && (
+                  <p className="help">Cliques e trechos de digitação geram foco automaticamente, com transições suaves. Durante a digitação, o foco permanece no campo selecionado.</p>
+                )}
                 <div className="motion-options">
                   <button
                     className={!look.smooth ? "active" : ""}
@@ -5567,7 +5573,13 @@ export default function App() {
               </div>
             )}
             {panel === "effect" && !currentEffect && (
-              <p className="help">Selecione uma anotação na timeline.</p>
+              <>
+                <div className="effect-tools">
+                  <button className="wide subtle" onClick={() => addEffect("spotlight")}>◉ Spotlight</button>
+                  <button className="wide subtle" onClick={() => addEffect("mask")}>▧ Proteger com blur</button>
+                </div>
+                <p className="help">Destaque uma ação com spotlight ou cubra informações com blur. Arraste a área na prévia e ajuste a duração na timeline.</p>
+              </>
             )}
             {panel === "effect" && currentEffect && (
               <>
@@ -5617,9 +5629,13 @@ export default function App() {
                 )}
                 <p className="help">
                   Arraste a área no vídeo para mover e use a alça para
-                  redimensionar. A posição fica fixa no quadro enquanto a câmera
-                  se move.
+                  redimensionar. {canvasEffect(currentEffect.kind)
+                    ? "A posição fica fixa no quadro final."
+                    : "A área acompanha o conteúdo durante os zooms."}
                 </p>
+                {currentEffect.kind === "mask" && (
+                  <button className="wide subtle" onClick={() => effectChange({ end: media?.duration ?? currentEffect.end })}>Proteger até o fim do vídeo</button>
+                )}
                 <Range
                   label="Largura"
                   min={4}
@@ -5649,7 +5665,7 @@ export default function App() {
                 {currentEffect.kind !== "mask" &&
                   currentEffect.kind !== "magnifier" && (
                     <Range
-                      label="Opacidade"
+                      label={currentEffect.kind === "spotlight" ? "Escurecimento ao redor" : "Opacidade"}
                       min={10}
                       max={100}
                       suffix="%"
@@ -5849,6 +5865,13 @@ export default function App() {
               title="Adicionar destaque no marcador"
             >
               ✦ Destacar
+            </button>
+            <button
+              disabled={!project || busy || !media}
+              onClick={() => addEffect("spotlight")}
+              title="Adicionar spotlight no marcador"
+            >
+              ◉ Spotlight
             </button>
             <select
               aria-label="Adicionar anotação"

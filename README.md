@@ -12,7 +12,9 @@
   [![Windows](https://img.shields.io/badge/Windows-suportado-0078D4?style=flat-square&logo=windows)](#compatibilidade)
   [![macOS](https://img.shields.io/badge/macOS-13%2B-000000?style=flat-square&logo=apple)](#compatibilidade)
 
-  [Visão geral](#visão-geral) · [Recursos](#destaques) · [Instalação](#executando-localmente) · [Documentação](#documentação) · [Contribuição](#contribuindo)
+  [Visão geral](#visão-geral) · [Recursos](#destaques) · [Instalação](#instalação-no-windows) · [Desenvolvimento](#executando-localmente) · [Documentação](#documentação) · [Contribuição](#contribuindo)
+
+  [![Baixar para Windows](https://img.shields.io/badge/Baixar_para_Windows-Instalador_.exe_%C2%B7_v0.1.0-5530F5?style=for-the-badge)](https://github.com/andreodev/screen-record/releases/download/v0.1.0/Frame-Studio-Setup.exe)
 </div>
 
 <br />
@@ -69,6 +71,20 @@ Gravar ou importar  →  Editar na timeline  →  Personalizar  →  Exportar
 > [!NOTE]
 > O projeto está em desenvolvimento ativo (`0.1.0`). Recursos, formato do projeto e desempenho ainda podem mudar antes de uma versão estável.
 
+## Instalação no Windows
+
+**[Baixar Frame Studio v0.1.0 para Windows — instalador `.exe`](https://github.com/andreodev/screen-record/releases/download/v0.1.0/Frame-Studio-Setup.exe)**
+
+1. Baixe o instalador para **Windows 10/11 de 64 bits**.
+2. Execute `Frame-Studio-Setup.exe` e siga o assistente em português ou inglês.
+3. Abra **Frame Studio** pelo menu Iniciar.
+
+O instalador inclui FFmpeg, FFprobe, os recursos visuais e o desinstalador. Você não precisa instalar Node.js, Rust ou ferramentas de desenvolvimento para usar o aplicativo. Se o WebView2 estiver ausente, o assistente baixa o runtime da Microsoft; essa etapa requer internet.
+
+Esta é uma versão de prévia, ainda sem assinatura digital. Políticas do Windows que exigem aplicativos assinados podem bloquear sua execução. As [notas da versão](https://github.com/andreodev/screen-record/releases/tag/v0.1.0) e o [arquivo de verificação SHA-256](https://github.com/andreodev/screen-record/releases/download/v0.1.0/SHA256SUMS.txt) acompanham o download.
+
+Para desinstalar, abra **Configurações → Aplicativos → Frame Studio → Desinstalar**.
+
 ## Executando localmente
 
 ### Pré-requisitos comuns
@@ -102,6 +118,14 @@ Build local sem instalador:
 pnpm tauri build --debug --no-bundle
 .\src-tauri\target\debug\screen-studio.exe
 ```
+
+Para gerar o instalador de distribuição otimizado:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1
+```
+
+Os arquivos prontos para publicar ficam em `artifacts/windows/`: `Frame-Studio-Setup.exe` e `SHA256SUMS.txt`. O script prepara as dependências de mídia quando necessário e gera o instalador NSIS para o usuário atual.
 
 ### macOS
 

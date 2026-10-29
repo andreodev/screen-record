@@ -79,8 +79,9 @@ export function cameraAt(t: number, zooms: Zoom[], smooth = true): Camera {
   return camera;
 }
 export function autoZooms(events: CursorEvent[], duration: number): Zoom[] {
-  const actions: {t:number;x:number;y:number;scale:number}[] = [];
+  const actions: {t:number;x:number;y:number;scale:number;typing?:boolean}[] = [];
   let lastPressed = false, travel = 0, lastMovement = events[0]?.t ?? 0, lastMovePoint = events[0], lastIntent = -Infinity, lastTyping = -Infinity;
+  let typingAnchor: Point | undefined;
   for (let i = 0; i < events.length; i++) {
     const e = events[i], previous = events[i - 1];
     if (e.t < 0 || e.t > duration) continue;
@@ -90,11 +91,12 @@ export function autoZooms(events: CursorEvent[], duration: number): Zoom[] {
       if (distance > .002) { travel += distance; lastMovement = e.t; lastMovePoint = e; }
     }
     if (pressed && !lastPressed) {
+      typingAnchor = { x: e.x, y: e.y };
       actions.push({t:e.t,x:e.x,y:e.y,scale:1.65}); lastIntent = e.t; travel = 0;
-    } else if (e.typing && e.t - lastTyping >= 1.05) {
-      // Key events are impulses; throttle them into a sustained typing scene.
-      // Repeated events in the same region extend the current focus below.
-      actions.push({t:e.t,x:e.x,y:e.y,scale:1.5}); lastTyping = e.t; lastIntent = e.t; travel = 0;
+    } else if (e.typing && e.t - lastTyping >= .18) {
+      // Hold the field that received focus, even if the pointer moves while typing.
+      typingAnchor ??= { x: e.x, y: e.y };
+      actions.push({t:e.t,...typingAnchor,scale:1.5,typing:true}); lastTyping = e.t; lastIntent = e.t; travel = 0;
     } else if (!pressed && travel >= .16 && e.t - lastMovement >= .32 && e.t - lastIntent >= 1.15 && lastMovePoint) {
       actions.push({t:e.t,x:lastMovePoint.x,y:lastMovePoint.y,scale:1.4}); lastIntent = e.t; travel = 0;
     }
@@ -105,11 +107,12 @@ export function autoZooms(events: CursorEvent[], duration: number): Zoom[] {
   for (const action of actions) {
     const last = zooms[zooms.length - 1];
     if (last && action.t - previousAction < 1.3 && Math.hypot(last.x - action.x, last.y - action.y) < .25) {
-      last.end = Math.min(duration, action.t + 1.6); last.follow = true;
+      last.end = Math.min(duration, action.t + 1.6); last.follow = !action.typing;
+      if (action.typing) { last.x = action.x; last.y = action.y; }
     } else {
       if (last && action.t - previousAction < .85) continue;
       const start = Math.max(0, action.t - .65), end = Math.min(duration, action.t + 1.6);
-      if (end - start >= .4) zooms.push({ id: `auto-${zooms.length}`, start, end, x: action.x, y: action.y, scale: action.scale, enabled: true, follow: true, roiWidth: .3, roiHeight: .64 });
+      if (end - start >= .4) zooms.push({ id: `auto-${zooms.length}`, start, end, x: action.x, y: action.y, scale: action.scale, enabled: true, follow: !action.typing, roiWidth: .3, roiHeight: .64 });
     }
     previousAction = action.t;
   }
@@ -131,17 +134,23 @@ export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, eve
   const safePoints = new Map<number, CursorEvent>();
   // Bridge short gaps between auto focus blocks. Nearby blocks in one area become a single held scene;
   // a change of area overlaps briefly so the camera pans directly instead of returning to overview.
+  let previousScene = scheduled[0];
   for (let i = 1; i < scheduled.length; i++) {
-    const previous = scheduled[i - 1]!, current = scheduled[i]!;
-    if (!isAutoZoom(previous.zoom) || !isAutoZoom(current.zoom)) continue;
+    const previous = previousScene!, current = scheduled[i]!;
+    if (!isAutoZoom(previous.zoom) || !isAutoZoom(current.zoom)) { previousScene = current; continue; }
     const gap = current.zoom.start - previous.zoom.end;
-    if (gap > 2.5) continue;
+    if (gap > 2.5) { previousScene = current; continue; }
     if (Math.hypot(previous.zoom.x - current.zoom.x, previous.zoom.y - current.zoom.y) < .24) {
       previous.zoom.end = Math.max(previous.zoom.end, current.zoom.end);
       previous.zoom.scale = Math.max(previous.zoom.scale, current.zoom.scale);
+      if (current.zoom.follow === false) {
+        previous.zoom.follow = false;
+        previous.zoom.x = current.zoom.x; previous.zoom.y = current.zoom.y;
+      }
       current.zoom.enabled = false;
     } else {
       previous.zoom.end = Math.max(previous.zoom.end, current.zoom.start + .55);
+      previousScene = current;
     }
   }
   let next = 0;

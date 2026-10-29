@@ -36,7 +36,7 @@ fn valid_camera_motion(motion: &CameraMotion, duration: f64) -> bool {
     ["smooth", "cinematic", "dynamic"].contains(&motion.style.as_str())
         && bounded(motion.intensity, 0., 0.004) && bounded(motion.duration, 0.08, 0.18)
         && bounded(motion.frequency, 8., 16.) && bounded(motion.damping, 0.8, 1.5)
-        && bounded(motion.blur_intensity, 0., 0.5) && motion.impacts.len() <= 10000
+        && bounded(motion.blur_intensity, 0., 1.) && motion.impacts.len() <= 10000
         && motion.impacts.iter().all(|t| bounded(*t, 0., duration))
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -711,6 +711,14 @@ mod tests {
         assert!(valid_camera_motion(&motion, 3.)); assert!(!motion.webcam_shake);
         let saved: CameraMotion = serde_json::from_value(serde_json::to_value(&motion).unwrap()).unwrap();
         assert_eq!(saved.impacts, vec![1.,2.]); assert_eq!(saved.style,"cinematic");
+        for intensity in [0.7, 0.9, 1.] {
+            motion.blur_intensity = intensity;
+            assert!(valid_camera_motion(&motion, 3.), "Current motion presets must save and export");
+            let saved: CameraMotion = serde_json::from_value(serde_json::to_value(&motion).unwrap()).unwrap();
+            assert_eq!(saved.blur_intensity, intensity);
+        }
+        motion.blur_intensity = 1.01; assert!(!valid_camera_motion(&motion, 3.));
+        motion.blur_intensity = 0.7;
         motion.duration = f64::NAN; assert!(!valid_camera_motion(&motion,3.));
         motion.duration = 0.12; motion.intensity=0.05; assert!(!valid_camera_motion(&motion,3.));
         motion.intensity=0.0015; motion.impacts=vec![4.]; assert!(!valid_camera_motion(&motion,3.));

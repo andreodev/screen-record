@@ -10,10 +10,10 @@ if (process.platform !== 'win32') {
   process.exit(0);
 }
 const root = fileURLToPath(new URL('../', import.meta.url));
-const app = resolve(root, 'src-tauri/target/debug/screen-studio.exe');
+const app = process.env.FRAME_TEST_APP || resolve(root, 'src-tauri/target/debug/screen-studio.exe');
 const ffmpeg = resolve(root, 'src-tauri/resources/ffmpeg/ffmpeg.exe');
 const ffprobe = resolve(root, 'src-tauri/resources/ffmpeg/ffprobe.exe');
-const assetsRoot = resolve(root, 'src-tauri/resources/studio-assets');
+const assetsRoot = process.env.FRAME_TEST_ASSETS || resolve(root, 'src-tauri/resources/studio-assets');
 const folder = mkdtempSync(join(tmpdir(), 'frame-windows-test-'));
 const run = (...args) => execFileSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-nostdin', ...args], { windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024 * 1024 });
 const probe = path => JSON.parse(execFileSync(ffprobe, ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', path], { windowsHide: true }));
@@ -83,7 +83,7 @@ try {
     effects: [{ kind: 'highlight', start: 0, end: 1, x: .5, y: .5, width: .2, height: .2, opacity: .3 }, { kind: 'mask', start: 0, end: 1, x: .2, y: .2, width: .2, height: .2, opacity: 1 }],
   });
   job.appearance.aspect = '9:16'; job.appearance.backgroundMode = 'video-blur'; job.appearance.backgroundBlur = 2;
-  job.appearance.motionBlur = { cursor: .3, zoom: .3, pan: .3 };
+  job.appearance.motionBlur = { cursor: .25, zoom: .7, pan: .7 };
   result = await exportJob(job); assert.equal(result.code, 0, JSON.stringify(result));
   info = probe(composite); assert.equal(info.streams[0].width, 480); assert.equal(info.streams[0].height, 854); assert(info.streams.some(s => s.codec_type === 'audio'));
   // Actual pixels must contain the green webcam, rather than silently omit it.

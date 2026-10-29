@@ -2,6 +2,8 @@ mod capture;
 mod benchmark;
 mod studio;
 mod recording;
+#[cfg(any(windows, test))]
+mod typing;
 mod camera_preview;
 #[cfg(windows)]
 pub mod windows_media;

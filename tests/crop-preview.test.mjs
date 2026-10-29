@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, createReadStream } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
+import { videoFixture } from './video-fixture.mjs';
 
 // Real Chromium interaction and pixels, with only the Tauri bridge replaced.
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -17,7 +18,7 @@ let server, browser, socket;
 try {
   execFileSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=red:size=320x180:rate=30,drawbox=x=160:y=0:w=160:h=180:color=blue:t=fill', '-t', '3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', fixture], { windowsHide: true });
   server = await createServer({ root, server: { port: 0, strictPort: false, host: '127.0.0.1' }, plugins: [{ name: 'crop-test-fixture', configureServer(vite) {
-    vite.middlewares.use('/__crop-fixture.mp4', (_request, response) => { response.setHeader('Content-Type', 'video/mp4'); createReadStream(fixture).pipe(response); });
+    vite.middlewares.use('/__crop-fixture.mp4', videoFixture(fixture));
   } }] });
   await server.listen();
   const url = `http://127.0.0.1:${server.httpServer.address().port}`;
@@ -40,10 +41,12 @@ try {
   const evaluate = async expression => { const result = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails)); return result.result.value; };
   const until = async expression => { const end = Date.now() + 15000; while (!await evaluate(expression)) { if (Date.now() > end) throw new Error(`Timed out: ${expression}\n${await evaluate('document.body.innerText')}`); await wait(100); } };
   const click = text => evaluate(`[...document.querySelectorAll('button')].find(button => button.textContent.trim() === ${JSON.stringify(text)}).click()`);
-  const media = { path: 'fixture.mp4', width: 320, height: 180, duration: 3, cursorCaptured: true, cursor: Array.from({ length: 181 }, (_, i) => ({ t: i / 60, x: .7 + .05 * Math.sin(i / 20), y: .5, kind: i < 60 ? 'pointer' : i < 120 ? 'hand' : 'text', down: i === 40 })) };
+  const settle = () => evaluate('new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)))');
+  const media = { path: 'fixture.mp4', width: 320, height: 180, duration: 3, cursorCaptured: true, cursor: Array.from({ length: 181 }, (_, i) => ({ t: i / 60, x: .65 + .03 * Math.sin(i / 20), y: .5, kind: i < 60 ? 'pointer' : i < 120 ? 'hand' : 'text', down: i === 40 })) };
   const project = { version: 13, name: 'Crop UI test', mediaPath: media.path, trim: { start: 0, end: 3 }, zooms: [{ id: 'manual-test', start: .1, end: 2.8, x: .72, y: .5, scale: 1.65, enabled: true }], appearance: { background: 0, padding: 0, radius: 0, shadow: 0, cursorSize: 32, cursorTheme: 'macos', smooth: true, aspect: 'auto', cursorFollow: 'off', motionBlur: { cursor: 1, zoom: 1, pan: 1 } } };
   await send('Page.addScriptToEvaluateOnNewDocument', { source: `
     window.isTauri = true; window.__uiErrors = []; window.addEventListener('error', event => window.__uiErrors.push(event.message));
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
     const fixture = ${JSON.stringify({ media, project, path: '' })}; let loaded = false;
     window.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: 'main' } }, transformCallback: () => 0,
@@ -62,17 +65,20 @@ try {
   await click('⌗ Crop');
   await until(`document.querySelector('.crop-dialog')?.open`);
   await click('9:16');
+  await settle();
   const before = await evaluate(`document.querySelector('.crop-selection').getBoundingClientRect().toJSON()`);
   const drag = async (selector, dx, dy) => {
     const rect = await evaluate(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().toJSON()`);
     const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
     await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
     await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x + dx, y: y + dy, buttons: 1 });
+    await settle();
     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x + dx, y: y + dy, button: 'left', clickCount: 1 });
+    await settle();
   };
   await drag('.crop-move', 70, 0);
   const moved = await evaluate(`document.querySelector('.crop-selection').getBoundingClientRect().toJSON()`);
-  assert(moved.left > before.left + 50, 'Selection did not move');
+  assert(moved.left > before.left + 50, `Selection did not move: ${JSON.stringify({ before, moved })}`);
   await drag('.crop-handle-nw', 25, 20);
   const resized = await evaluate(`document.querySelector('.crop-selection').getBoundingClientRect().toJSON()`);
   assert(resized.width < moved.width - 10 && resized.height < moved.height - 10, 'Selection did not resize');
@@ -83,12 +89,14 @@ try {
   await click('⌗ Crop'); await click('Vídeo inteiro'); await click('Cancelar');
   assert(Math.abs(await evaluate(`document.querySelector('.scene').clientWidth / document.querySelector('.scene').clientHeight`) - ratio) < .01, 'Cancel changed the crop');
   await evaluate(`document.querySelector('.media-plane video').currentTime = .6`); await wait(250);
-  const blur = await evaluate(`(() => { const canvas = document.querySelector('.motion-preview'), video = document.querySelector('.media-plane video'); const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data; let cursorPixels = 0; for (let i = 0; i < data.length; i += 4) if (data[i] > 180 && data[i+1] > 180 && data[i+2] > 180) cursorPixels++; return { canvasHidden: canvas.hidden, videoVisibility: getComputedStyle(video).visibility, cursorPixels }; })()`);
-  assert.equal(blur.canvasHidden, false); assert.equal(blur.videoVisibility, 'hidden'); assert(blur.cursorPixels > 10, JSON.stringify(blur));
+  // The red/blue source has no green; a blurred white cursor adds green even when its outline is softened.
+  const blur = await evaluate(`(() => { const canvas = document.querySelector('.motion-preview'), video = document.querySelector('.media-plane video'); const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data; let cursorPixels = 0; for (let i = 0; i < data.length; i += 4) if (data[i+1] > 20 && data[i+3] > 0) cursorPixels++; return { canvasHidden: canvas.hidden, videoVisibility: getComputedStyle(video).visibility, cursorPixels }; })()`);
+  assert.equal(blur.canvasHidden, false); assert.equal(blur.videoVisibility, 'hidden');
   await evaluate(`document.querySelector('.header-actions .export-button').click()`);
   await until(`document.querySelector('.export-dialog').open`);
   await evaluate(`document.querySelector('.export-dialog form').requestSubmit()`);
   const exported = await evaluate('window.__exportSettings');
+  assert(blur.cursorPixels > 10, JSON.stringify(blur));
   assert(exported.appearance.crop && exported.appearance.crop.width < 1, 'Export lost selected crop');
   assert(exported.keys.every(key => key.x >= exported.appearance.crop.x && key.x <= exported.appearance.crop.x + exported.appearance.crop.width), 'Export camera left crop');
   await click('⌗ Crop'); await click('Vídeo inteiro'); await click('Aplicar recorte');

@@ -3,7 +3,7 @@ import type { Effect } from "./timeline.ts";
 export const effectLabels: Record<Effect["kind"], string> = {
   caption: "Legenda",
   watermark: "Marca d’água",
-  mask: "Desfoque",
+  mask: "Desfoque de privacidade",
   highlight: "Destaque",
   text: "Texto",
   arrow: "Seta",

@@ -905,7 +905,7 @@ func exportVideo(_ job: ExportJob, cancel: Cancellation) async throws {
                 guard !rect.isNull && !rect.isEmpty else { continue }
                 let shape = CIFilter(name: "CIRoundedRectangleGenerator", parameters: ["inputExtent": CIVector(cgRect: rect), "inputRadius": 8 * w / 1920 * frameCam.scale, "inputColor": CIColor.white])!.outputImage!.cropped(to: canvas)
                 if effect.kind == "mask" {
-                    let blurred = frame.clampedToExtent().applyingGaussianBlur(sigma: 14 * w / 1920).cropped(to: canvas)
+                    let blurred = frame.clampedToExtent().applyingGaussianBlur(sigma: 24 * w / 1920).cropped(to: canvas)
                     frame = blurred.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: frame, kCIInputMaskImageKey: shape]).cropped(to: canvas)
                 } else if effect.kind == "spotlight" {
                     let dim = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: effect.opacity)).cropped(to: canvas).composited(over: frame)

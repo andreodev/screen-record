@@ -36,6 +36,27 @@ assert.equal(typingScene.length, 1, 'A typing burst in one region should remain 
 assert.equal(typingScene[0]?.x, .7, 'Typing focus should use the pointer location where typing started');
 assert.ok(Math.abs((typingScene[0]?.end ?? 0) - 4.3) < 1e-9, 'Continued typing should extend the same focus instead of returning to overview');
 assert.equal(cursorAt(1.6, [{t:1.6,x:.7,y:.6,down:false,typing:true}])?.typing, true, 'Typing intent survives cursor sampling');
+const fieldTyping = autoZooms([
+  { t: 0, x: .35, y: .55, down: false },
+  { t: .2, x: .35, y: .55, down: true },
+  { t: .25, x: .35, y: .55, down: false },
+  ...Array.from({ length: 25 }, (_, i) => ({ t: 1 + i * .12, x: .9, y: .1, down: false, typing: true })),
+], 7);
+assert.equal(fieldTyping.length, 1, 'Typing must hold one scene after clicking a field');
+assert.equal(fieldTyping[0].x, .35, 'Moving the mouse must not steal focus from the field being typed into');
+assert.equal(fieldTyping[0].follow, false, 'Typing scenes must hold the field rather than chase the pointer');
+assert.ok(fieldTyping[0].end >= 5.4, 'Focus must last through the end of a typing section');
+const typingPath = cameraKeys(fieldTyping, 7, true, [
+  { t: 0, x: .35, y: .55, down: false }, { t: 1, x: .9, y: .1, down: false },
+], true);
+assert.ok(cameraFromKeys(3, typingPath).x < .45, 'Generated typing camera must remain on the input region');
+
+const chainedScenes = cameraKeys([
+  { id: 'auto-chain-0', start: .2, end: 1.6, x: .6, y: .5, scale: 1.4, enabled: true },
+  { id: 'auto-chain-1', start: 2, end: 3.2, x: .6, y: .5, scale: 1.4, enabled: true },
+  { id: 'auto-chain-2', start: 3.7, end: 5, x: .6, y: .5, scale: 1.4, enabled: true },
+], 6, true);
+assert.ok(cameraFromKeys(4.3, chainedScenes).scale > 1.3, 'Merging three related scenes must preserve the last scene');
 assert.equal(autoZooms([{t:0,x:.1,y:.1,down:false},{t:.2,x:.1,y:.1,down:true},{t:.25,x:.1,y:.1,down:false},{t:.7,x:.9,y:.9,down:true},{t:.75,x:.9,y:.9,down:false}], 3).length, 1, 'A distant second interaction inside the camera cooldown should not trigger a jolt');
 assert.deepEqual(autoZooms(events.map(e => ({ ...e, down: false })), 6), []);
 assert.equal(cursorAt(0, []), null);
