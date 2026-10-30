@@ -31,7 +31,14 @@
 .timeline .clip-track { height: 100%; border-radius: 7px; }
 .timeline .audio-track { height: 22px; margin: 0; overflow: visible; }
 .timeline .effect-track { height: 26px; margin: 0; overflow: visible; }
-.timeline .effect-block { height: calc(100% - 4px); }
+.timeline .effect-block { height: calc(100% - 4px); touch-action: none; user-select: none; cursor: grab; padding-inline: 12px; }
+.timeline .effect-block:active { cursor: grabbing; }
+.effect-timing-label { overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.effect-timing-handle { position: absolute; inset-block: 0; width: min(10px, 33%); cursor: ew-resize; z-index: 1; }
+.effect-timing-handle.start { left: 0; }
+.effect-timing-handle.end { right: 0; }
+.effect-timing-handle::after { content: ""; position: absolute; left: 50%; top: 22%; bottom: 22%; width: 2px; border-radius: 2px; background: #d8e5ff80; }
+.effect-block.selected .effect-timing-handle::after, .effect-block:hover .effect-timing-handle::after { background: #fff; }
 .timeline .webcam-track { height: 24px; margin: 0; overflow: visible; }
 .timeline .zoom-track { height: 34px; margin: 0; border: 1px solid #b49aff20; border-radius: 7px; }
 .timeline .tracks > div { flex-shrink: 0; }

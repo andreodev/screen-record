@@ -84,7 +84,7 @@ func recordingOptions() throws -> RecordingOptions {
 }
 func isFloatingPreview(_ owner: Int32?, _ title: String?) -> Bool {
     guard let parent = ProcessInfo.processInfo.environment["FRAME_PREVIEW_OWNER_PID"].flatMap(Int32.init) else { return false }
-    return owner == parent && title == "Frame Studio — Webcam"
+    return owner == parent && ["Frame Studio — Webcam", "Frame Studio — Captura", "Frame Studio — Gravando"].contains(title ?? "")
 }
 func cameraDevices() -> [AVCaptureDevice] {
     let types: [AVCaptureDevice.DeviceType]
@@ -1029,6 +1029,45 @@ func makeCursor(size: Double) -> CIImage {
     return CIImage(cgImage: context.makeImage()!)
 }
 
+struct StitchSegment: Decodable { let path: String; let duration: Double }
+struct StitchJob: Decodable { let segments: [StitchSegment]; let destination: String; let audioOnly: Bool }
+func stitchRecording(_ path: String) async throws {
+    let job = try JSONDecoder().decode(StitchJob.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+    guard !job.segments.isEmpty, job.segments.count <= 1000, job.segments.allSatisfy({ $0.duration.isFinite && $0.duration > 0 }) else { throw Failure(message: "Trechos de gravação inválidos.") }
+    let composition = AVMutableComposition()
+    let video = job.audioOnly ? nil : composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
+    var audio: AVMutableCompositionTrack?
+    var cursor = CMTime.zero
+    for segment in job.segments {
+        let asset = AVURLAsset(url: URL(fileURLWithPath: segment.path))
+        let duration = CMTime(seconds: segment.duration, preferredTimescale: 60000)
+        if let video = video, let source = asset.tracks(withMediaType: .video).first {
+            let available = CMTimeMinimum(duration, source.timeRange.duration)
+            try video.insertTimeRange(CMTimeRange(start: .zero, duration: available), of: source, at: cursor)
+            if cursor == .zero { video.preferredTransform = source.preferredTransform }
+            if available < duration { video.scaleTimeRange(CMTimeRange(start: cursor, duration: available), toDuration: duration) }
+        } else if !job.audioOnly { throw Failure(message: "Trecho de vídeo indisponível.") }
+        if let source = asset.tracks(withMediaType: .audio).first {
+            if audio == nil { audio = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) }
+            let available = CMTimeMinimum(duration, source.timeRange.duration)
+            try audio?.insertTimeRange(CMTimeRange(start: .zero, duration: available), of: source, at: cursor)
+            if available < duration { audio?.insertEmptyTimeRange(CMTimeRange(start: cursor + available, duration: duration - available)) }
+        } else if let audio = audio { audio.insertEmptyTimeRange(CMTimeRange(start: cursor, duration: duration)) }
+        else if job.audioOnly { throw Failure(message: "Trecho de áudio indisponível.") }
+        cursor = cursor + duration
+    }
+    guard let exporter = AVAssetExportSession(asset: composition, presetName: job.audioOnly ? AVAssetExportPresetAppleM4A : AVAssetExportPresetHighestQuality) else { throw Failure(message: "Não foi possível unir a gravação.") }
+    exporter.outputURL = URL(fileURLWithPath: job.destination)
+    exporter.outputFileType = job.audioOnly ? .m4a : .mov
+    exporter.timeRange = CMTimeRange(start: .zero, duration: cursor)
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        exporter.exportAsynchronously { continuation.resume() }
+    }
+    if let error = exporter.error { throw error }
+    guard exporter.status == .completed else { throw Failure(message: "A união dos trechos não foi concluída.") }
+    emit(["event": "stitched", "path": job.destination])
+}
+
 @main struct Main {
     @MainActor static func main() async {
         do {
@@ -1062,6 +1101,7 @@ func makeCursor(size: Double) -> CIImage {
                 let iconSet = NSWorkspace.shared.setIcon(icon, forFile: package.path, options: [])
                 emit(["event": "preview", "path": destination.path, "iconSet": iconSet])
             case "analyze-audio": try await analyzeAudio(args[2])
+            case "concat": try await stitchRecording(args[2])
             case "inspect": try await emitMedia(metadata(args[2]))
             case "devices":
                 let selected = AVCaptureDevice.default(for: .video)?.uniqueID

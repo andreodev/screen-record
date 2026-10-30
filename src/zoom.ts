@@ -78,10 +78,72 @@ export function cameraAt(t: number, zooms: Zoom[], smooth = true): Camera {
   for (const z of zooms) camera = blendZoom(camera, z, t, smooth);
   return camera;
 }
+type AutoAction = Point & {
+  t: number; until: number; kind: "click" | "typing" | "dwell";
+  minX: number; maxX: number; minY: number; maxY: number;
+};
+const AUTO_ZOOM_PREFIX = "auto-v3-";
+function autoFraming(zoom: Zoom, actions: AutoAction[], events: CursorEvent[], firstEvent: number, until: number): Zoom {
+  const first = actions[0], last = actions[actions.length - 1];
+  const typing = last.kind === "typing";
+  const dragging = !typing && actions.some(action => Math.hypot(action.maxX - action.minX, action.maxY - action.minY) > .06);
+  let minX = zoom.x, maxX = zoom.x, minY = zoom.y, maxY = zoom.y;
+  let lastIntentTime = first.t, lastIntentUntil = first.until;
+  const include = (point: Point) => {
+    minX = Math.min(minX, point.x); maxX = Math.max(maxX, point.x);
+    minY = Math.min(minY, point.y); maxY = Math.max(maxY, point.y);
+  };
+  for (const action of actions) {
+    if (action.kind !== "dwell") { lastIntentTime = action.t; lastIntentUntil = action.until; }
+    include(action);
+    if (dragging) {
+      include({ x: action.minX, y: action.minY });
+      include({ x: action.maxX, y: action.maxY });
+    }
+  }
+  let departure = 0;
+  if (!typing && !dragging) {
+    // Pointer travel after a click is navigation, not the size of its subject.
+    // Let following handle that travel; only soften the shot slightly.
+    const observe = (point: Point) => {
+      departure = Math.max(departure, Math.hypot(point.x - clamp(point.x, minX, maxX), point.y - clamp(point.y, minY, maxY)));
+    };
+    for (let i = firstEvent; i < events.length && events[i].t <= until; i++) observe(events[i]);
+    const endPoint = cursorAt(until, events);
+    if (endPoint) observe(endPoint);
+  }
+  const spreadX = maxX - minX, spreadY = maxY - minY;
+  const spread = Math.hypot(spreadX, spreadY);
+  const attentionUntil = Math.min(until, Math.max(lastIntentTime + .9, lastIntentUntil));
+  const attention = 1 - Math.exp(-Math.max(0, attentionUntil - first.t) / 1.4);
+  // Typing needs horizontal room for the field; a compact click can be framed
+  // more closely. Wider activity and fast navigation keep more context visible.
+  const roiWidth = clamp((typing ? .3 : .24) + spreadX * 1.1, .08, 1);
+  const roiHeight = clamp((typing ? .26 : .24) + spreadY * 1.1, .08, 1);
+  const clicking = actions.some(action => action.kind === "click");
+  const intentScale = typing ? 2.3 + attention * .7
+    : clicking ? 2.35 + attention * .65 : 1.85 + attention * .5;
+  const minimum = dragging ? 1.35 : typing || clicking ? 2.05 : 1.8;
+  // A followed shot pans between controls: their combined bounds need not fit
+  // simultaneously. Only a held field or drag needs the full region constraint.
+  const regionLimit = typing || dragging ? Math.min(.9 / roiWidth, .88 / roiHeight) : 3;
+  const scale = clamp(Math.min(intentScale / (1 + spread * .15) - Math.min(departure, .7) * .25, regionLimit), minimum, 3);
+  return {
+    ...zoom,
+    x: typing ? zoom.x : (minX + maxX) / 2,
+    y: typing ? zoom.y : (minY + maxY) / 2,
+    scale: Math.round(scale * 100) / 100,
+    roiWidth, roiHeight,
+  };
+}
 export function autoZooms(events: CursorEvent[], duration: number): Zoom[] {
-  const actions: {t:number;x:number;y:number;scale:number;typing?:boolean}[] = [];
+  const actions: AutoAction[] = [];
   let lastPressed = false, travel = 0, lastMovement = events[0]?.t ?? 0, lastMovePoint = events[0], lastIntent = -Infinity, lastTyping = -Infinity;
   let typingAnchor: Point | undefined;
+  let pressedAction: AutoAction | undefined;
+  const actionAt = (t: number, point: Point, kind: AutoAction["kind"]): AutoAction => ({
+    t, x: point.x, y: point.y, until: t, kind, minX: point.x, maxX: point.x, minY: point.y, maxY: point.y,
+  });
   for (let i = 0; i < events.length; i++) {
     const e = events[i], previous = events[i - 1];
     if (e.t < 0 || e.t > duration) continue;
@@ -90,35 +152,83 @@ export function autoZooms(events: CursorEvent[], duration: number): Zoom[] {
       const distance = Math.hypot(e.x - previous.x, e.y - previous.y);
       if (distance > .002) { travel += distance; lastMovement = e.t; lastMovePoint = e; }
     }
+    if (pressedAction) {
+      pressedAction.until = e.t;
+      pressedAction.minX = Math.min(pressedAction.minX, e.x); pressedAction.maxX = Math.max(pressedAction.maxX, e.x);
+      pressedAction.minY = Math.min(pressedAction.minY, e.y); pressedAction.maxY = Math.max(pressedAction.maxY, e.y);
+      if (!pressed) pressedAction = undefined;
+    }
     if (pressed && !lastPressed) {
       typingAnchor = { x: e.x, y: e.y };
-      actions.push({t:e.t,x:e.x,y:e.y,scale:1.65}); lastIntent = e.t; travel = 0;
+      pressedAction = actionAt(e.t, e, "click");
+      actions.push(pressedAction); lastIntent = e.t; travel = 0;
     } else if (e.typing && e.t - lastTyping >= .18) {
       // Hold the field that received focus, even if the pointer moves while typing.
       typingAnchor ??= { x: e.x, y: e.y };
-      actions.push({t:e.t,...typingAnchor,scale:1.5,typing:true}); lastTyping = e.t; lastIntent = e.t; travel = 0;
+      actions.push(actionAt(e.t, typingAnchor, "typing")); lastTyping = e.t; lastIntent = e.t; travel = 0;
     } else if (!pressed && travel >= .16 && e.t - lastMovement >= .32 && e.t - lastIntent >= 1.15 && lastMovePoint) {
-      actions.push({t:e.t,x:lastMovePoint.x,y:lastMovePoint.y,scale:1.4}); lastIntent = e.t; travel = 0;
+      actions.push(actionAt(e.t, lastMovePoint, "dwell")); lastIntent = e.t; travel = 0;
     }
     lastPressed = pressed;
   }
-  const zooms: Zoom[] = [];
+  const scenes: { zoom: Zoom; actions: AutoAction[] }[] = [];
   let previousAction = -Infinity;
   for (const action of actions) {
-    const last = zooms[zooms.length - 1];
-    if (last && action.t - previousAction < 1.3 && Math.hypot(last.x - action.x, last.y - action.y) < .25) {
-      last.end = Math.min(duration, action.t + 1.6); last.follow = !action.typing;
-      if (action.typing) { last.x = action.x; last.y = action.y; }
+    const scene = scenes[scenes.length - 1], last = scene?.zoom;
+    const typing = action.kind === "typing";
+    const hold = typing ? 2.8 : action.kind === "click" ? 3.8 : 2.8;
+    const end = Math.min(duration, Math.max(action.t + hold, action.until + 1.2));
+    const sameRegion = last && Math.hypot(last.x - action.x, last.y - action.y) < (typing || last.follow === false ? .24 : .36);
+    if (last && sameRegion && action.t - previousAction < 2.6 && action.t - scene.actions[0].t < 7.5) {
+      last.end = Math.max(last.end, end); last.follow = !typing;
+      scene.actions.push(action);
+      if (typing) { last.x = action.x; last.y = action.y; }
     } else {
-      if (last && action.t - previousAction < .85) continue;
-      const start = Math.max(0, action.t - .65), end = Math.min(duration, action.t + 1.6);
-      if (end - start >= .4) zooms.push({ id: `auto-${zooms.length}`, start, end, x: action.x, y: action.y, scale: action.scale, enabled: true, follow: !action.typing, roiWidth: .3, roiHeight: .64 });
+      // Brief visits to another region stay inside the current followed shot.
+      // Commit to a new composition only after enough time to read it.
+      if (last && action.t - previousAction < 2.2) continue;
+      const start = Math.max(0, action.t - .75);
+      if (end - start >= .4) scenes.push({
+        zoom: { id: `${AUTO_ZOOM_PREFIX}${scenes.length}`, start, end, x: action.x, y: action.y, scale: 1, enabled: true, follow: !typing },
+        actions: [action],
+      });
     }
     previousAction = action.t;
   }
-  return zooms;
+  let firstEvent = 0;
+  return scenes.map((scene, i) => {
+    const first = scene.actions[0], last = scene.actions[scene.actions.length - 1];
+    while (firstEvent < events.length && events[firstEvent].t < first.t) firstEvent++;
+    const until = Math.min(duration, scenes[i + 1]?.actions[0].t ?? duration, Math.max(last.until, last.t + .9));
+    const next = scenes[i + 1]?.zoom;
+    if (next) scene.zoom.end = Math.min(scene.zoom.end, next.start + .55);
+    else if (duration - scene.zoom.end < 1.5) scene.zoom.end = duration;
+    return autoFraming(scene.zoom, scene.actions, events, firstEvent, until);
+  });
 }
 export function isAutoZoom(zoom: Zoom): boolean { return zoom.id.startsWith("auto-") && !zoom.manualOverride; }
+function withUniqueZoomIds(generated: Zoom[], preserved: Zoom[]): Zoom[] {
+  const ids = new Set(preserved.map(zoom => zoom.id));
+  const refreshed = generated.map(zoom => {
+    let id = zoom.id;
+    for (let suffix = 1; ids.has(id); suffix++) id = `${zoom.id}-${suffix}`;
+    ids.add(id);
+    return { ...zoom, id };
+  });
+  return [...refreshed, ...preserved];
+}
+export function regenerateAutoZooms(zooms: Zoom[], events: CursorEvent[], duration: number): Zoom[] {
+  return withUniqueZoomIds(autoZooms(events, duration), zooms.filter(zoom => !isAutoZoom(zoom)));
+}
+/** Refresh obsolete suggestions once while preserving the user's edits and disabled intervals. */
+export function upgradeAutoZooms(zooms: Zoom[], events: CursorEvent[], duration: number): Zoom[] {
+  if (!events.length || !zooms.some(zoom => isAutoZoom(zoom) && zoom.enabled && !zoom.id.startsWith(AUTO_ZOOM_PREFIX))) return zooms;
+  const generated = autoZooms(events, duration);
+  if (!generated.length) return zooms;
+  const preserved = zooms.filter(zoom => !isAutoZoom(zoom) || !zoom.enabled);
+  const protectedIntervals = preserved.filter(zoom => zoom.id.startsWith("auto-"));
+  return withUniqueZoomIds(generated.filter(zoom => !protectedIntervals.some(saved => zoom.start < saved.end && zoom.end > saved.start)), preserved);
+}
 export function zoomsForMode(zooms: Zoom[], mode: NonNullable<Appearance["cameraMode"]>): Zoom[] {
   if (mode === "auto") return zooms.filter(isAutoZoom);
   if (mode === "manual") return zooms.filter(zoom => !isAutoZoom(zoom));
@@ -140,7 +250,9 @@ export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, eve
     if (!isAutoZoom(previous.zoom) || !isAutoZoom(current.zoom)) { previousScene = current; continue; }
     const gap = current.zoom.start - previous.zoom.end;
     if (gap > 2.5) { previousScene = current; continue; }
-    if (Math.hypot(previous.zoom.x - current.zoom.x, previous.zoom.y - current.zoom.y) < .24) {
+    if (Math.hypot(previous.zoom.x - current.zoom.x, previous.zoom.y - current.zoom.y) < .24
+      && Math.abs(previous.zoom.scale - current.zoom.scale) < .08 && previous.zoom.follow === current.zoom.follow
+      && !previous.zoom.id.startsWith(AUTO_ZOOM_PREFIX) && !current.zoom.id.startsWith(AUTO_ZOOM_PREFIX)) {
       previous.zoom.end = Math.max(previous.zoom.end, current.zoom.end);
       previous.zoom.scale = Math.max(previous.zoom.scale, current.zoom.scale);
       if (current.zoom.follow === false) {
@@ -200,11 +312,18 @@ export function cameraKeys(zooms: Zoom[], duration: number, smooth: boolean, eve
         .78 / Math.max(.08, layout.width * (zoom.roiWidth ?? .3)),
         .76 / Math.max(.08, layout.height * (zoom.roiHeight ?? .64)),
       );
-      // Portrait auto scenes first reach the exact cover scale implied by the
-      // fitted frame. This is derived from geometry, not a visual multiplier.
+      // Honor each scene's computed strength. Portrait output still reaches
+      // cover, without magnifying a compact interaction ROI beyond its scale.
       let scale = isAutoZoom(zoom) && outputAspect < 1
-        ? Math.max(zoom.scale, roiScale, coverageScale)
-        : isAutoZoom(zoom) ? Math.min(1.4, zoom.scale) : clamp(zoom.scale, 1, 3);
+        ? Math.max(Math.min(zoom.scale, roiScale), coverageScale)
+        : clamp(zoom.scale, 1, 3);
+      if (isAutoZoom(zoom) && zoom.id.startsWith(AUTO_ZOOM_PREFIX) && !zoom.instant) {
+        // A slow push-in adds progression during a held shot. Its strength
+        // comes from the scene, so seeking and native export remain identical.
+        const progress = ease((t - zoom.start - .45) / Math.min(3, Math.max(1.2, (zoom.end - zoom.start) * .65)));
+        const base = outputAspect < 1 ? coverageScale : 1;
+        scale = base + (scale - base) * (.85 + .15 * progress);
+      }
       if (isAutoZoom(zoom) && zoom.follow && point) {
         const travel = Math.hypot((point.x - cameraState.x) / cameraSpanX(scale), (point.y - cameraState.y) / cameraSpanY(scale));
         scale = Math.max(outputAspect < 1 ? coverageScale : 1, scale / (1 + clamp((travel - .32) * .6, 0, .25)));

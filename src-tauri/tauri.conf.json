@@ -4,19 +4,22 @@
   "version": "0.1.0",
   "identifier": "com.andreodev.screenstudio",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
-        "title": "Frame Studio",
-        "width": 1280,
-        "height": 820,
-        "minWidth": 900,
-        "minHeight": 650
+        "title": "Frame Studio — Captura",
+        "width": 460,
+        "height": 370,
+        "minWidth": 420,
+        "minHeight": 340,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "contentProtected": true
       }
     ],
     "security": {

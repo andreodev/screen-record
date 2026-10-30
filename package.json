@@ -5,21 +5,27 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "desktop:dev": "tauri dev",
+    "desktop:build": "tauri build",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "test": "node --test tests/*.test.ts",
+    "test:frontend": "node tests/recorder-launcher.test.mjs && node tests/timeline-preview.test.mjs && node tests/crop-preview.test.mjs",
+    "test:recording:native": "cargo build --manifest-path src-tauri/Cargo.toml && node tests/recording-stitch.test.mjs && node tests/tray-recording.test.mjs",
     "tauri": "tauri"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2",
+    "motion": "^14.7.1",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "@tauri-apps/api": "^2"
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.2",
     "typescript": "~6.0.3",
-    "vite": "^8.0.16",
-    "@tauri-apps/cli": "^2"
+    "vite": "^8.0.16"
   }
 }

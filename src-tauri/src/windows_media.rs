@@ -3,6 +3,7 @@
 mod audio;
 mod render;
 mod sources;
+mod stitch;
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -51,6 +52,9 @@ fn dispatch(args: &[String]) -> Result<()> {
             Ok(())
         }
         Some("analyze-audio") => analyze_audio(Path::new(arg(1)?)),
+        Some("concat") => stitch::run(Path::new(arg(1)?)),
+        #[cfg(debug_assertions)]
+        Some("record-fixture") => record_fixture(Path::new(arg(1)?), Path::new(arg(2)?)),
         Some("inspect") => emit_media(Path::new(arg(1)?)),
         Some("preview") => {
             let destination = Path::new(arg(2)?).join("QuickLook/Preview.png");
@@ -89,6 +93,27 @@ fn emit(value: Value) {
     let _ = serde_json::to_writer(&mut lock, &value);
     let _ = lock.write_all(b"\n");
     let _ = lock.flush();
+}
+
+// Opt-in debug worker: exercises the real private control pipe with generated media,
+// without capturing the user's screen, camera or microphone.
+#[cfg(debug_assertions)]
+fn record_fixture(source: &Path, destination: &Path) -> Result<()> {
+    let stop = stop_signal();
+    let began = Instant::now();
+    emit(json!({"event":"started"}));
+    while !stop.load(Ordering::SeqCst) {
+        emit(json!({"event":"recording-time","seconds":began.elapsed().as_secs_f64()}));
+        thread::sleep(Duration::from_millis(50));
+    }
+    let duration = began.elapsed().as_secs_f64().clamp(0.2, 8.);
+    check_output(ffmpeg()?.args(["-nostdin","-i"]).arg(source).arg("-t").arg(duration.to_string())
+        .args(["-c","copy","-y"]).arg(destination).output()?)?;
+    fs::write(destination.with_extension("cursor.json"), serde_json::to_vec(&vec![
+        json!({"t":0.,"x":0.2,"y":0.5,"down":false}),
+        json!({"t":duration/2.,"x":0.7,"y":0.5,"down":true})
+    ])?)?;
+    emit_media(destination)
 }
 
 fn tool(name: &str) -> Result<PathBuf> {

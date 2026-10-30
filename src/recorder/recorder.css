@@ -1,0 +1,307 @@
+.recorder-launcher {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  color: var(--text-1);
+  background: #111510;
+}
+.recorder-header {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  height: 38px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--line);
+  cursor: grab;
+  user-select: none;
+}
+.recorder-brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.recorder-brand strong {
+  font-size: 12px;
+  letter-spacing: -0.3px;
+}
+.recorder-brand strong span {
+  font-weight: 400;
+  color: var(--text-2);
+}
+.recorder-brand .brand-mark {
+  display: inline-block;
+  flex-shrink: 0;
+  transform: scale(0.75);
+  margin-right: -3px;
+}
+.recorder-window-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+.recorder-window-actions button {
+  height: 25px;
+  width: 27px;
+  padding: 0;
+  color: var(--text-2);
+  font-size: 17px;
+}
+.recorder-window-actions button:last-child:hover {
+  background: #6c2d29;
+  color: white;
+}
+.recorder-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 14px;
+  scrollbar-width: thin;
+  scrollbar-color: #3c4537 transparent;
+}
+.recorder-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  height: 24px;
+}
+.recorder-section-heading h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 550;
+  letter-spacing: -0.3px;
+}
+.recorder-section-heading button {
+  width: 24px;
+  padding: 2px;
+  color: var(--text-3);
+  font-size: 17px;
+}
+.recorder-modes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.recorder-mode {
+  position: relative;
+  height: 43px;
+  gap: 7px;
+  padding: 6px;
+  background: #1b2118;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 11px;
+  overflow: hidden;
+}
+.recorder-mode svg {
+  width: 17px;
+  height: 17px;
+  color: var(--text-2);
+}
+.recorder-mode.selected {
+  background: #d8ff630e;
+  border-color: #d8ff6347;
+  color: var(--signal);
+}
+.recorder-mode.selected svg {
+  color: var(--signal);
+}
+.capture-mode-active {
+  position: absolute;
+  bottom: 0;
+  height: 2px;
+  left: 24%;
+  right: 24%;
+  background: var(--signal);
+  border-radius: 2px 2px 0 0;
+}
+.recorder-source {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  color: var(--text-3);
+  font-size: 10px;
+}
+.recorder-source > span {
+  width: 46px;
+  flex-shrink: 0;
+}
+.recorder-source select {
+  flex: 1;
+  min-width: 0;
+}
+.recorder-launcher select {
+  background: #1a2017;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 6px 7px;
+  color: var(--text-1);
+  font-size: 11px;
+  text-overflow: ellipsis;
+}
+.recorder-devices {
+  border-top: 1px solid var(--line);
+  padding-top: 9px;
+  margin-top: 10px;
+  display: grid;
+  gap: 6px;
+}
+.recorder-device {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.recorder-device > button {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 5px;
+  background: #21261f;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text-3);
+}
+.recorder-device > button svg {
+  width: 15px;
+  height: 15px;
+}
+.recorder-device.enabled > button {
+  background: #d8ff6312;
+  border-color: #d8ff6333;
+  color: var(--signal);
+}
+.recorder-device label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.recorder-device label > span {
+  width: 91px;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-2);
+}
+.recorder-device small {
+  display: none;
+}
+.recorder-device select {
+  width: 100%;
+  min-width: 0;
+}
+.recorder-device select:disabled {
+  opacity: 0.35;
+}
+.recorder-area {
+  border: 0;
+  padding: 8px 0 0;
+  margin: 6px 0 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+.recorder-area legend {
+  font-size: 9px;
+  color: var(--text-3);
+  padding: 0;
+}
+.recorder-area label {
+  display: grid;
+  gap: 3px;
+  font-size: 9px;
+  color: var(--text-2);
+}
+.recorder-area input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 6px;
+  background: #1a2017;
+  color: var(--text-1);
+  font-size: 11px;
+}
+.recorder-area small {
+  grid-column: 1/-1;
+  font-size: 9px;
+  color: #f1c7a2;
+}
+.recorder-options {
+  margin-top: 10px;
+  color: var(--text-3);
+  font-size: 10px;
+}
+.recorder-options summary {
+  cursor: pointer;
+  user-select: none;
+}
+.recorder-options summary span {
+  margin-left: 8px;
+  color: var(--text-2);
+}
+.recorder-options > div {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding-top: 7px;
+}
+.recorder-options button {
+  font-size: 10px;
+  padding: 5px;
+}
+.recorder-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 8px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--line);
+  background: #0d100c;
+}
+.recorder-file-actions {
+  display: flex;
+  gap: 1px;
+  align-items: center;
+}
+.recorder-file-actions button {
+  font-size: 10px;
+  padding: 6px;
+  color: var(--text-2);
+}
+.recorder-start {
+  color: #14180c;
+  background: var(--signal);
+  font-size: 11px;
+  font-weight: 650;
+  padding: 9px 19px;
+  border-radius: 6px;
+}
+.recorder-start:hover:enabled {
+  background: #e3ff91;
+}
+.recorder-start .red-dot {
+  background: #263113;
+  width: 6px;
+  height: 6px;
+}
+.recorder-feedback {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 10px;
+  color: #f1c7a2;
+  background: #31251a;
+}
+.recorder-feedback button {
+  font-size: 10px;
+  padding: 3px;
+}

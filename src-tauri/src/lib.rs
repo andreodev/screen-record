@@ -5,6 +5,9 @@ mod recording;
 #[cfg(any(windows, test))]
 mod typing;
 mod camera_preview;
+mod workspace;
+mod recording_tray;
+mod recording_session;
 #[cfg(windows)]
 pub mod windows_media;
 
@@ -27,12 +30,14 @@ pub fn run() {
     tauri::Builder::default()
         .manage(Recorder::default())
         .manage(camera_preview::CameraPreview::default())
+        .manage(recording_session::RecordingSession::default())
         .plugin(tauri_plugin_dialog::init())
         .on_menu_event(|app, event| {
             if event.id().as_ref() == "quit-safe" { let app = app.clone(); std::thread::spawn(move || studio::request_shutdown(app)); }
         })
-        .invoke_handler(tauri::generate_handler![studio::recent_projects, studio::open_recent_project, studio::analyze_recording_audio, studio::import_subtitles, studio::list_capture_sources, studio::list_recording_devices, studio::import_video, studio::choose_background_audio, studio::open_project, studio::save_project, studio::autosave_project, studio::take_pending_project, camera_preview::camera_preview_snapshot, camera_preview::start_camera_preview, camera_preview::stop_camera_preview, studio::open_camera_settings, studio::open_microphone_settings, studio::start_recording, studio::stop_operation, studio::export_video, studio::reveal_clip, studio::studio_asset_root, studio::open_screen_recording_settings, benchmark::benchmark_config, benchmark::report_preview_benchmark])
+        .invoke_handler(tauri::generate_handler![recording_session::toggle_recording_pause, workspace::set_workspace_mode, workspace::workspace_window_action, studio::recent_projects, studio::open_recent_project, studio::analyze_recording_audio, studio::import_subtitles, studio::list_capture_sources, studio::list_recording_devices, studio::import_video, studio::choose_background_audio, studio::open_project, studio::save_project, studio::autosave_project, studio::take_pending_project, camera_preview::camera_preview_snapshot, camera_preview::start_camera_preview, camera_preview::stop_camera_preview, studio::open_camera_settings, studio::open_microphone_settings, studio::start_recording, studio::stop_operation, studio::export_video, studio::reveal_clip, studio::studio_asset_root, studio::open_screen_recording_settings, benchmark::benchmark_config, benchmark::report_preview_benchmark])
         .setup(|app| {
+            recording_tray::setup(app)?;
             #[cfg(any(target_os = "macos", target_os = "windows"))] {
                 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
                 let menu = Menu::default(app.handle())?;
@@ -67,6 +72,7 @@ pub fn run() {
         .on_page_load(|_webview, _payload| {
             #[cfg(debug_assertions)]
             if _payload.event() == tauri::webview::PageLoadEvent::Finished && std::env::var_os("FRAME_STUDIO_BENCHMARK").is_some() {
+                if benchmark::config().ok().flatten().is_some_and(|c| c["mode"] == "recording-test") { return; }
                 if benchmark::config().ok().flatten().is_some_and(|c| c["mode"] == "floating-preview") {
                     let _ = _webview.eval(include_str!("../../tests/floating-preview-benchmark.js"));
                 } else if _webview.label() == "main" { let _ = _webview.eval(include_str!("../../tests/preview-benchmark.js")); }

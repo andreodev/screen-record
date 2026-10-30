@@ -114,7 +114,7 @@ pub(crate) fn studio_asset_root(app: tauri::AppHandle) -> Result<String, String>
     app.asset_protocol_scope().allow_directory(&root, true).map_err(|e| e.to_string())?;
     Ok(root.to_string_lossy().into_owned())
 }
-fn run(app: &tauri::AppHandle, args: &[&str]) -> Result<Value, String> {
+pub(crate) fn run(app: &tauri::AppHandle, args: &[&str]) -> Result<Value, String> {
     let output = helper_command(app)?.args(args).stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
     let value: Value = std::str::from_utf8(&output.stdout).map_err(|e| e.to_string())?.lines().last().ok_or("Motor nativo não respondeu.").and_then(|line| serde_json::from_str(line).map_err(|_| "Resposta inválida do motor nativo."))?;
     if !output.status.success() { return Err(value["message"].as_str().unwrap_or("Falha no motor nativo.").into()); }
@@ -524,25 +524,32 @@ fn acquire(app: &tauri::AppHandle) -> Result<(), String> {
     if app.state::<Recorder>().exit_after_operation.load(Ordering::SeqCst) { return Err("O aplicativo está encerrando.".into()); }
     if app.state::<Recorder>().busy.swap(true, Ordering::SeqCst) { Err("Já existe uma operação em andamento.".into()) } else { Ok(()) }
 }
-fn spawn_operation(app: tauri::AppHandle, kind: &'static str, arg: PathBuf, cleanup: bool, webcam: Option<PathBuf>, capture_audio: (bool, bool), options: Option<crate::recording::RecordingOptions>) {
-    std::thread::spawn(move || {
-        let result = (|| -> Result<(&str, Value), String> {
-            let mut command = helper_command(&app)?; command.arg(kind).arg(&arg); if let Some(path) = &webcam { command.arg(path); }
+pub(crate) fn run_native_operation(app: &tauri::AppHandle, kind: &str, arg: &Path, webcam: Option<&Path>, capture_audio: (bool, bool), options: Option<&crate::recording::RecordingOptions>, offset: f64, resumed: bool) -> Result<Value, String> {
+            let mut command = helper_command(app)?;
+            #[cfg(all(debug_assertions, windows))]
+            let fixture = crate::benchmark::config()?.filter(|c| c["mode"] == "recording-test").and_then(|c| c["recordFixture"].as_str().map(PathBuf::from)).filter(|p| p.is_file());
+            #[cfg(not(all(debug_assertions, windows)))]
+            let fixture: Option<PathBuf> = None;
+            if let Some(source) = fixture.filter(|_| kind == "record") {
+                command.arg("record-fixture").arg(source).arg(arg);
+            } else {
+                command.arg(kind).arg(arg); if let Some(path) = &webcam { command.arg(path); }
+            }
             if let Some(options) = options { command.env("FRAME_CAPTURE_OPTIONS", serde_json::to_string(&options).map_err(|e| e.to_string())?); }
             if capture_audio.0 { command.arg("--system-audio"); } if capture_audio.1 { command.arg("--microphone"); }
             let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn().map_err(|e| e.to_string())?;
             *app.state::<Recorder>().control.lock().map_err(|e| e.to_string())? = child.stdin.take();
-            if app.state::<Recorder>().exit_after_operation.load(Ordering::SeqCst) { let _ = stop_operation(app.clone()); }
+            if app.state::<Recorder>().exit_after_operation.load(Ordering::SeqCst) || kind == "record" && crate::recording_session::is_stopping(app) { if let Some(pipe) = app.state::<Recorder>().control.lock().map_err(|e| e.to_string())?.as_mut() { let _ = pipe.write_all(b"stop\n"); } }
             let stdout = child.stdout.take().ok_or("Não foi possível ler o motor nativo.")?;
             let mut final_event = None;
             let mut native_error = None;
             for line in BufReader::new(stdout).lines() {
                 let line = line.map_err(|e| e.to_string())?;
-                let Ok(value) = serde_json::from_str::<Value>(&line) else { continue };
+                let Ok(mut value) = serde_json::from_str::<Value>(&line) else { continue };
                 match value["event"].as_str() {
-                    Some("started") => { let _ = app.emit("recording-started", ()); }
-                    Some("camera-frame") => crate::camera_preview::frame(&app, &value["data"]),
-                    Some("recording-time") => { let _ = app.emit("recording-time", &value); }
+                    Some("started") => crate::recording_session::started(app, resumed),
+                    Some("camera-frame") => crate::camera_preview::frame(app, &value["data"]),
+                    Some("recording-time") => { value["seconds"] = json!(offset + value["seconds"].as_f64().unwrap_or(0.)); let _ = app.emit("recording-time", &value); }
                     Some("progress") => { let _ = app.emit("export-progress", &value); }
                     Some("media") => { final_event = Some(value); }
                     Some("exported") => { final_event = Some(value); }
@@ -554,6 +561,18 @@ fn spawn_operation(app: tauri::AppHandle, kind: &'static str, arg: PathBuf, clea
             let status = child.wait().map_err(|e| e.to_string())?;
             if !status.success() { return Err(native_error.unwrap_or("O motor nativo encerrou inesperadamente.".into())); }
             let value = final_event.ok_or("A operação terminou sem resultado.")?;
+    app.state::<Recorder>().control.lock().ok().map(|mut c| c.take());
+    Ok(value)
+}
+
+fn spawn_operation(app: tauri::AppHandle, kind: &'static str, arg: PathBuf, cleanup: bool, webcam: Option<PathBuf>, capture_audio: (bool, bool), options: Option<crate::recording::RecordingOptions>) {
+    std::thread::spawn(move || {
+        let result = (|| -> Result<(&str, Value), String> {
+            let value = if kind == "record" {
+                crate::recording_session::capture(&app, &arg, webcam.as_deref(), capture_audio, options.as_ref().ok_or("Opções de gravação ausentes.")?)?
+            } else {
+                run_native_operation(&app, kind, &arg, webcam.as_deref(), capture_audio, options.as_ref(), 0., false)?
+            };
             if kind == "record" {
                 let mut media = load_media(&app, &arg)?;
                 if let Some(camera_path) = &webcam { if camera_path.is_file() { media.webcam_path = Some(camera_path.canonicalize().map_err(|e| e.to_string())?.to_string_lossy().into_owned()); app.asset_protocol_scope().allow_file(camera_path).map_err(|e| e.to_string())?; } }
@@ -573,10 +592,10 @@ fn spawn_operation(app: tauri::AppHandle, kind: &'static str, arg: PathBuf, clea
         })();
         app.state::<Recorder>().control.lock().ok().map(|mut c| c.take());
         app.state::<Recorder>().busy.store(false, Ordering::SeqCst);
-        if kind == "record" { crate::camera_preview::close(&app); }
+        if kind == "record" { crate::camera_preview::close(&app); crate::recording_session::finish(&app); }
         if cleanup { let _ = std::fs::remove_file(arg); }
         if app.state::<Recorder>().exit_after_operation.load(Ordering::SeqCst) { app.exit(0); }
-        match result { Ok((event, value)) => { let _ = app.emit(event, value); }, Err(error) => { let _ = app.emit("operation-error", error); } }
+        match result { Ok((event, value)) => { let _ = app.emit(event, value); }, Err(error) => { let _ = app.emit("operation-error", error); if kind == "record" { let _ = crate::workspace::set_workspace_mode(app.clone(), crate::workspace::WorkspaceMode::Recorder); } } }
     });
 }
 #[tauri::command]
@@ -593,19 +612,20 @@ pub(crate) async fn start_recording(app: tauri::AppHandle, with_webcam: bool, wi
     tauri::async_runtime::spawn_blocking(move || {
         let options = options.unwrap_or_default(); options.validate()?;
         acquire(&app)?;
+        crate::recording_session::begin(&app);
         let result = (|| {
             crate::camera_preview::prepare_recording(&app, with_webcam)?;
             helper(&app)?;
             let package = app.path().home_dir().map_err(|e| e.to_string())?.join("Frame Studio Projects").join(format!("Gravação-{}.framestudio", timestamp()?));
             #[cfg(debug_assertions)]
-            let package = match crate::benchmark::config()? { Some(c) if c["mode"] == "floating-preview" => c["recordingProject"].as_str().map(PathBuf::from).unwrap_or(package), _ => package };
+            let package = match crate::benchmark::config()? { Some(c) if c["mode"] == "floating-preview" || c["mode"] == "recording-test" => c["recordingProject"].as_str().map(PathBuf::from).unwrap_or(package), _ => package };
             let folder = package.join("media"); std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
             Ok::<_, String>((folder.join("recording.mov"), with_webcam.then(|| folder.join("webcam.mov"))))
         })();
         match result {
             Ok((path, webcam)) => { spawn_operation(app, "record", path, false, webcam, (with_system_audio, with_microphone), Some(options)); Ok(()) },
             Err(error) => {
-                crate::camera_preview::close(&app); app.state::<Recorder>().busy.store(false, Ordering::SeqCst);
+                crate::camera_preview::close(&app); app.state::<Recorder>().busy.store(false, Ordering::SeqCst); crate::recording_session::finish(&app);
                 if app.state::<Recorder>().exit_after_operation.load(Ordering::SeqCst) { app.exit(0); }
                 Err(error)
             }
@@ -614,6 +634,7 @@ pub(crate) async fn start_recording(app: tauri::AppHandle, with_webcam: bool, wi
 }
 #[tauri::command]
 pub(crate) fn stop_operation(app: tauri::AppHandle) -> Result<(), String> {
+    if crate::recording_session::stop(&app)? { return Ok(()); }
     let state = app.state::<Recorder>();
     let mut control = state.control.lock().map_err(|e| e.to_string())?;
     let pipe = control.as_mut().ok_or("O motor está iniciando. Tente novamente em um instante.")?;

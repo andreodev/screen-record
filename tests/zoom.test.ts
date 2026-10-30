@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { autoZooms, cameraAt, cameraFrame, cameraFromKeys, cameraKeys, cameraPoint, cameraViewportTransform, cursorAt, frameLayout, visibleSpans, zoomsForMode } from '../src/zoom.ts';
+import { autoZooms, cameraAt, cameraFrame, cameraFromKeys, cameraKeys, cameraPoint, cameraViewportTransform, cursorAt, frameLayout, regenerateAutoZooms, upgradeAutoZooms, visibleSpans, zoomsForMode } from '../src/zoom.ts';
 
 const verticalLayout = frameLayout(16 / 9, 9 / 16, false);
 const paddedVerticalLayout = frameLayout(16 / 9, .514, false);
@@ -21,9 +21,12 @@ const mixedZooms = [...zooms, { id:'hand-edit', start:2, end:3, x:.5, y:.5, scal
 assert.equal(zoomsForMode(mixedZooms, 'auto').length, zooms.length);
 assert.equal(zoomsForMode(mixedZooms, 'manual').length, 1);
 assert.equal(zoomsForMode(mixedZooms, 'hybrid').length, mixedZooms.length);
-assert.deepEqual(zoomsForMode([{ ...zooms[0]!, manualOverride: true }, mixedZooms[2]!], 'hybrid').map(zoom => zoom.id), ['auto-0', 'hand-edit'], 'Hybrid mode places manual edits above generated camera suggestions');
+assert.deepEqual(zoomsForMode([{ ...zooms[0]!, manualOverride: true }, mixedZooms[2]!], 'hybrid').map(zoom => zoom.id), [zooms[0].id, 'hand-edit'], 'Hybrid mode places manual edits above generated camera suggestions');
 assert.equal(zoomsForMode([{ ...zooms[0]!, manualOverride: true }], 'manual').length, 1, 'Editing a generated zoom makes it available in manual mode');
-assert.equal(autoZooms([{t:0,x:.1,y:.1,down:false},{t:.1,x:.3,y:.2,down:false},{t:.2,x:.3,y:.2,down:false},{t:.45,x:.3,y:.2,down:false},{t:.5,x:.3,y:.2,down:false}], 2)[0]?.scale, 1.4, 'A significant move followed by a dwell should create one softer focus');
+const dwellFocus = autoZooms([{t:0,x:.1,y:.1,down:false},{t:.1,x:.3,y:.2,down:false},{t:.2,x:.3,y:.2,down:false},{t:.45,x:.3,y:.2,down:false},{t:.5,x:.3,y:.2,down:false}], 2)[0];
+assert.ok(dwellFocus && dwellFocus.scale >= 1.65 && dwellFocus.scale < 2.2, 'A significant move followed by a dwell should create a visible, softer focus');
+const timedDwell = autoZooms([{ t: 0, x: .1, y: .5, down: false }, { t: 2, x: .7, y: .5, down: false }, { t: 2.4, x: .7, y: .5, down: false }], 5)[0];
+assert.ok(timedDwell.start >= 1.6, 'A dwell must use the time of the pause instead of accidentally inheriting the last movement timestamp');
 assert.equal(autoZooms([{t:0,x:.5,y:.5,down:false},{t:.1,x:.51,y:.5,down:false},{t:.5,x:.51,y:.5,down:false}], 2).length, 0, 'Small pointer movements should not trigger a zoom');
 assert.equal(autoZooms([{t:0,x:.2,y:.4,down:false},{t:.5,x:.2,y:.4,down:false,rightDown:true},{t:.55,x:.2,y:.4,down:false,rightDown:false}], 2).length, 1, 'Right-click interactions should be recognized');
 const typingScene = autoZooms([
@@ -34,7 +37,7 @@ const typingScene = autoZooms([
 ], 5);
 assert.equal(typingScene.length, 1, 'A typing burst in one region should remain a single camera scene');
 assert.equal(typingScene[0]?.x, .7, 'Typing focus should use the pointer location where typing started');
-assert.ok(Math.abs((typingScene[0]?.end ?? 0) - 4.3) < 1e-9, 'Continued typing should extend the same focus instead of returning to overview');
+assert.ok((typingScene[0]?.end ?? 0) >= 4.8, 'Continued typing should hold the field long enough to read the result');
 assert.equal(cursorAt(1.6, [{t:1.6,x:.7,y:.6,down:false,typing:true}])?.typing, true, 'Typing intent survives cursor sampling');
 const fieldTyping = autoZooms([
   { t: 0, x: .35, y: .55, down: false },
@@ -50,6 +53,92 @@ const typingPath = cameraKeys(fieldTyping, 7, true, [
   { t: 0, x: .35, y: .55, down: false }, { t: 1, x: .9, y: .1, down: false },
 ], true);
 assert.ok(cameraFromKeys(3, typingPath).x < .45, 'Generated typing camera must remain on the input region');
+
+const focusedClickEvents = [
+  { t: 0, x: .5, y: .5, down: false },
+  { t: 1, x: .5, y: .5, down: true },
+  { t: 1.1, x: .5, y: .5, down: false },
+  { t: 3, x: .5, y: .5, down: false },
+];
+const focusedClick = autoZooms(focusedClickEvents, 4)[0];
+const quickVisit = autoZooms([
+  ...focusedClickEvents.slice(0, 3),
+  { t: 1.25, x: .85, y: .5, down: false },
+  { t: 3, x: .85, y: .5, down: false },
+], 4)[0];
+const repeatedClicks = autoZooms([
+  ...focusedClickEvents.slice(0, 3),
+  { t: 1.8, x: .5, y: .5, down: true },
+  { t: 1.9, x: .5, y: .5, down: false },
+  { t: 2.6, x: .5, y: .5, down: true },
+  { t: 2.7, x: .5, y: .5, down: false },
+  { t: 4, x: .5, y: .5, down: false },
+], 5)[0];
+const spreadClicks = autoZooms([
+  { t: 0, x: .35, y: .5, down: false },
+  { t: 1, x: .35, y: .5, down: true },
+  { t: 1.1, x: .35, y: .5, down: false },
+  { t: 1.8, x: .5, y: .5, down: true },
+  { t: 1.9, x: .5, y: .5, down: false },
+  { t: 2.6, x: .58, y: .5, down: true },
+  { t: 2.7, x: .58, y: .5, down: false },
+  { t: 4, x: .58, y: .5, down: false },
+], 5)[0];
+const drag = autoZooms([
+  { t: 0, x: .15, y: .2, down: false },
+  { t: 1, x: .15, y: .2, down: true },
+  { t: 2, x: .5, y: .5, down: true },
+  { t: 2.8, x: .85, y: .8, down: false },
+  { t: 4, x: .85, y: .8, down: false },
+], 5)[0];
+assert.ok(focusedClick.scale >= 2.4, 'A stable compact interaction should produce a clearly magnified shot');
+assert.ok(quickVisit.scale >= 2 && quickVisit.scale < focusedClick.scale - .05, 'Navigation after a click should soften the shot without collapsing the interaction to an overview');
+assert.ok(repeatedClicks.scale > focusedClick.scale + .15, 'Sustained attention in one place should justify a closer shot');
+assert.ok(spreadClicks.scale < repeatedClicks.scale - .05, 'A group of controls needs more context than repeated clicks in one place');
+assert.ok(spreadClicks.roiWidth! > repeatedClicks.roiWidth!, 'The inferred region must grow with interaction spread');
+assert.ok(spreadClicks.scale >= 1.85, 'Grouped controls still need a visible zoom rather than almost unchanged framing');
+assert.ok(drag.scale < focusedClick.scale - .5 && drag.roiWidth! > .9, 'A long drag should show its path instead of tightly cropping its start');
+assert.ok(drag.end >= 3.4, 'A long drag must keep its camera scene active through release');
+assert.ok(fieldTyping[0].roiWidth! > focusedClick.roiWidth!, 'Typing reserves more horizontal context for the input field');
+assert.ok(dwellFocus.scale < focusedClick.scale, 'Passive pointer dwell should be gentler than an intentional click');
+assert.ok(new Set([focusedClick, quickVisit, repeatedClicks, spreadClicks, drag, dwellFocus].map(zoom => zoom.scale)).size >= 5, 'Different interaction contexts must not collapse to two preset magnifications');
+const steadyTrace = (hz: number) => Array.from({ length: 4 * hz + 1 }, (_, i) => ({
+  t: i / hz, x: .5, y: .5, down: i / hz >= 1 && i / hz < 1.1,
+}));
+assert.deepEqual(autoZooms(steadyTrace(60), 4), autoZooms(steadyTrace(120), 4), 'Zoom decisions must depend on time and geometry rather than cursor sample count');
+assert.deepEqual(autoZooms(focusedClickEvents, 4), autoZooms(focusedClickEvents, 4), 'Contextual framing must be deterministic');
+const adaptiveKeys = cameraKeys([focusedClick], 4, true, focusedClickEvents);
+assert.ok(cameraFromKeys(2, adaptiveKeys).scale > 2.25, 'Preview and export must preserve the stronger computed magnification');
+assert.ok(cameraFromKeys(3.5, adaptiveKeys).scale > cameraFromKeys(2, adaptiveKeys).scale + .08, 'A held automatic shot must progressively move closer instead of staying static');
+assert.ok(focusedClick.end - focusedClick.start >= 3.5, 'An isolated click must create a readable shot rather than a brief pulse');
+const spacedClicks = autoZooms([
+  { t: 0, x: .5, y: .5, down: false },
+  ...[1, 3.1, 5.2].flatMap(t => [{ t, x: .5, y: .5, down: true }, { t: t + .1, x: .5, y: .5, down: false }]),
+  { t: 10, x: .5, y: .5, down: false },
+], 10);
+assert.equal(spacedClicks.length, 1, 'Related actions separated by reading pauses must share one sustained shot');
+assert.ok(spacedClicks[0].end - spacedClicks[0].start > 8, 'Related focus must last across the complete activity');
+const oldSuggestion = { id: 'auto-0', start: .5, end: 3, x: .5, y: .5, scale: 1.08, enabled: true };
+const handEdit = { ...oldSuggestion, id: 'manual-1', start: 2, end: 3, scale: 2.2 };
+const upgraded = upgradeAutoZooms([oldSuggestion, handEdit], focusedClickEvents, 4);
+assert.ok(upgraded.some(zoom => zoom.id.startsWith('auto-v3-') && zoom.scale > 2.4 && zoom.end - zoom.start > 3.5), 'Existing weak suggestions must receive the stronger, longer framing');
+assert.strictEqual(upgraded.find(zoom => zoom.id === handEdit.id), handEdit, 'Upgrading automatic shots must preserve manual edits');
+assert.strictEqual(upgradeAutoZooms(upgraded, focusedClickEvents, 4), upgraded, 'Current suggestions must not regenerate repeatedly or undo user edits');
+const cleared: typeof upgraded = [];
+assert.strictEqual(upgradeAutoZooms(cleared, focusedClickEvents, 4), cleared, 'An intentionally cleared timeline must stay empty');
+const disabled = { ...oldSuggestion, id: 'auto-disabled', enabled: false };
+const withDisabled = upgradeAutoZooms([oldSuggestion, disabled], focusedClickEvents, 4);
+assert.strictEqual(withDisabled.find(zoom => zoom.id === disabled.id), disabled, 'Disabled automatic shots must survive an upgrade');
+assert.ok(withDisabled.every(zoom => !zoom.enabled || zoom.end <= disabled.start || zoom.start >= disabled.end), 'An upgrade must not reintroduce focus over a disabled interval');
+const editedAutomatic = { ...focusedClick, manualOverride: true, scale: 2.1 };
+const recalculated = regenerateAutoZooms([editedAutomatic, handEdit], focusedClickEvents, 4);
+assert.strictEqual(recalculated.find(zoom => zoom.id === editedAutomatic.id), editedAutomatic, 'Recalculating automatic shots must retain hand-adjusted suggestions');
+assert.equal(new Set(recalculated.map(zoom => zoom.id)).size, recalculated.length, 'Recalculation must not create duplicate IDs after editing an automatic shot');
+const changingStrength = cameraKeys([
+  { id: 'auto-detail', start: .2, end: 1.8, x: .5, y: .5, scale: 2.4, enabled: true },
+  { id: 'auto-context', start: 2.4, end: 3.8, x: .5, y: .5, scale: 1.2, enabled: true },
+], 4, true);
+assert.ok(cameraFromKeys(1.5, changingStrength).scale > 2.3 && cameraFromKeys(3.5, changingStrength).scale < 1.3, 'Nearby scenes must retain their own strengths when context changes');
 
 const chainedScenes = cameraKeys([
   { id: 'auto-chain-0', start: .2, end: 1.6, x: .6, y: .5, scale: 1.4, enabled: true },
@@ -123,7 +212,7 @@ const analyzedZooms = [
 const analyzedMobile = cameraKeys(analyzedZooms, 19.635, true, [], false, 1, 1, false, false, 16 / 9, .514);
 const analyzedDesktop = cameraKeys(analyzedZooms, 19.635, true, [], false, 1, 1, false, false, 16 / 9, 16 / 9);
 assert.ok(cameraFromKeys(12.906, analyzedMobile).scale >= 1 / paddedVerticalLayout.height - .02, 'Mobile zoom reaches the exact cover scale needed to use the padded canvas height');
-assert.ok(cameraFromKeys(12.906, analyzedDesktop).scale <= 1.4, 'Desktop framing keeps its contextual auto zoom');
+assert.ok(cameraFromKeys(11.5, analyzedDesktop).scale > 1.6, 'Desktop framing honors the scene strength instead of imposing a fixed cap');
 assert.ok(Math.abs(cameraFromKeys(12.906, analyzedMobile).scale - cameraFromKeys(12.74, analyzedMobile).scale) < .12, 'A short gap between different scenes must pan continuously without returning to overview');
 assert.ok(cameraFromKeys(17, analyzedMobile).scale > 2.2, 'A short pause before the next interaction should retain the current readable scene');
 const heldVertical = cameraKeys([

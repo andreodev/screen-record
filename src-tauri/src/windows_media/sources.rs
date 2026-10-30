@@ -7,7 +7,7 @@ fn floating_preview(handle: HWND) -> bool {
     unsafe { GetWindowThreadProcessId(handle, &mut owner); }
     if owner != parent { return false; }
     let count = unsafe { GetWindowTextW(handle, title.as_mut_ptr(), title.len() as i32) };
-    String::from_utf16_lossy(&title[..count.max(0) as usize]) == "Frame Studio — Webcam"
+    ["Frame Studio — Webcam", "Frame Studio — Captura", "Frame Studio — Gravando"].contains(&String::from_utf16_lossy(&title[..count.max(0) as usize]).as_str())
 }
 
 unsafe extern "system" fn monitor(handle: HMONITOR, _: HDC, _: *mut RECT, data: LPARAM) -> windows_sys::core::BOOL {

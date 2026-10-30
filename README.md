@@ -60,6 +60,12 @@ Gravar ou importar  →  Editar na timeline  →  Personalizar  →  Exportar
 3. Personalize o fundo, o cursor, a câmera, as animações e as anotações.
 4. Exporte no formato, resolução, proporção e frame rate desejados.
 
+A preparação da captura abre em uma janela compacta. Ao gravar, ela fica
+oculta: use o ícone do Frame Studio na bandeja do Windows ou na barra de menus
+do macOS para **pausar**, **retomar** ou **parar e abrir o editor**. Não há
+contador flutuante sobre a tela. A pausa interrompe a captura dos dispositivos;
+o tempo pausado não entra no vídeo final.
+
 ## Compatibilidade
 
 | Plataforma | Captura | Edição | Exportação | Observações |
@@ -107,15 +113,21 @@ Instale o Visual Studio Build Tools 2022 com **Desenvolvimento para desktop com 
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/setup-windows.ps1
-pnpm tauri dev
+npm.cmd run desktop:dev
 ```
 
 O script prepara FFmpeg/FFprobe em `src-tauri/resources/ffmpeg/`. Essas ferramentas são empacotadas com a aplicação e não precisam estar no `PATH` do usuário final.
 
+Se o Windows bloquear `pnpm.exe` com uma mensagem do Device Guard, use
+`npm.cmd run desktop:dev` com as dependências já instaladas. A inicialização e o
+build do Tauri usam npm e não dependem do executável global do pnpm.
+Isso não altera as políticas de segurança do Windows; uma liberação desse
+executável, quando necessária, deve ser feita pelo administrador da máquina.
+
 Build local sem instalador:
 
 ```powershell
-pnpm tauri build --debug --no-bundle
+npm.cmd run desktop:build -- --debug --no-bundle
 .\src-tauri\target\debug\screen-studio.exe
 ```
 

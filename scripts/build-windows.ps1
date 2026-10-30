@@ -12,7 +12,7 @@ try {
     }
     if ($missing) { & (Join-Path $PSScriptRoot 'setup-windows.ps1') }
 
-    pnpm tauri build --bundles nsis
+    npm.cmd run desktop:build -- --bundles nsis
     if ($LASTEXITCODE -ne 0) { throw 'Falha ao gerar o instalador Windows.' }
 
     $version = (Get-Content -LiteralPath 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json).version
